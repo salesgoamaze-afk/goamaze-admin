@@ -1,0 +1,243 @@
+@import "tailwindcss";
+@source not "../data";
+
+/* ─── Design Tokens ─────────────────────────────────────────── */
+:root {
+  --bg-primary:       #0F172A;
+  --bg-secondary:     #1E293B;
+  --bg-card:          rgba(255, 255, 255, 0.04);
+  --bg-card-hover:    rgba(255, 255, 255, 0.08);
+  --border-glass:     rgba(255, 255, 255, 0.10);
+  --border-glass-hover: rgba(139, 92, 246, 0.40);
+
+  --blue:             #3B82F6;
+  --purple:           #8B5CF6;
+  --lavender:         #C4B5FD;
+  --indigo:           #6366F1;
+
+  --text-primary:     #F8FAFC;
+  --text-secondary:   #CBD5E1;
+  --text-muted:       #64748B;
+
+  --gradient-main:    linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+  --gradient-soft:    linear-gradient(135deg, rgba(59,130,246,0.15) 0%, rgba(139,92,246,0.15) 100%);
+  --gradient-card:    linear-gradient(145deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+
+  --shadow-glow:      0 0 40px rgba(139, 92, 246, 0.15);
+  --shadow-card:      0 8px 32px rgba(0, 0, 0, 0.4);
+  --shadow-button:    0 8px 24px rgba(99, 102, 241, 0.35);
+
+  --radius-card:      20px;
+  --radius-button:    50px;
+
+  --font-heading:     'Montserrat', sans-serif;
+  --font-body:        'Poppins', sans-serif;
+}
+
+/* ─── Reset & Base ───────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-size: 16px;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+/* ─── Custom Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, #3B82F6, #8B5CF6);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: #8B5CF6; }
+
+/* ─── Utility Classes ────────────────────────────────────────── */
+
+/* Gradient text */
+.gradient-text {
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: var(--gradient-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-card);
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-glass-hover);
+  box-shadow: var(--shadow-glow), var(--shadow-card);
+  transform: translateY(-4px);
+}
+
+/* Primary gradient button */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  background: var(--gradient-main);
+  color: white;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.9rem;
+  border-radius: var(--radius-button);
+  border: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-button);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.btn-primary:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 12px 32px rgba(99, 102, 241, 0.5);
+  filter: brightness(1.1);
+}
+.btn-primary:active { transform: scale(0.98); }
+
+/* Ghost / outline button */
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 13px 30px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.9rem;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border-glass);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.btn-ghost:hover {
+  border-color: var(--purple);
+  background: rgba(139, 92, 246, 0.08);
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.12);
+  transform: translateY(-2px);
+}
+
+/* Section wrapper */
+.section-wrapper {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* Section heading */
+.section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 99px;
+  color: var(--lavender);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+/* Glow blob (decorative) */
+.glow-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ─── Animations ─────────────────────────────────────────────── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-12px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.2); }
+  50%       { box-shadow: 0 0 40px rgba(139, 92, 246, 0.45); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.float-anim  { animation: float 4s ease-in-out infinite; }
+.float-anim-delay { animation: float 4s ease-in-out 1.5s infinite; }
+.glow-pulse  { animation: pulse-glow 3s ease-in-out infinite; }
+
+/* ─── Responsive Helpers ─────────────────────────────────────── */
+.hidden-mobile {
+  display: flex !important;
+}
+.show-mobile {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .section-wrapper { 
+    padding: 0 16px; 
+  }
+  
+  .hidden-mobile {
+    display: none !important;
+  }
+  
+  .show-mobile {
+    display: flex !important;
+  }
+
+  /* Optimize button sizes for mobile touch */
+  .btn-primary, .btn-ghost {
+    padding: 12px 22px;
+    font-size: 0.85rem;
+  }
+
+  /* Make sure inputs do not zoom in on iOS Safari */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .section-wrapper {
+    padding: 0 12px;
+  }
+}

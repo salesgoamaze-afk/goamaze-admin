@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Soft radial ambient glow -->
+    <radialGradient id="bgGlow" cx="45%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.30"/>
+      <stop offset="45%" stop-color="#3B82F6" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Premium Shopping Bag Gradient: Royal Electric Blue -> Vivid Indigo -> Royal Purple -->
+    <linearGradient id="bagGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="35%" stop-color="#4F46E5"/>
+      <stop offset="70%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#9333EA"/>
+    </linearGradient>
+
+    <!-- Subtle Inner Bevel / Sheen for 3D premium feel -->
+    <linearGradient id="bagSheen" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.4"/>
+      <stop offset="30%" stop-color="#FFFFFF" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Handle Gradient -->
+    <linearGradient id="handleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93C5FD"/>
+      <stop offset="50%" stop-color="#C4B5FD"/>
+      <stop offset="100%" stop-color="#DDD6FE"/>
+    </linearGradient>
+
+    <!-- Dynamic Speed Arrow Gradient: Energy Orange -> Sunset Amber -> Golden Glow -->
+    <linearGradient id="arrowGradient" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EA580C"/>
+      <stop offset="40%" stop-color="#F97316"/>
+      <stop offset="85%" stop-color="#FB923C"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+
+    <!-- Sparkle Diamond Gradient -->
+    <linearGradient id="sparkleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FEF08A"/>
+      <stop offset="45%" stop-color="#FBBF24"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </linearGradient>
+
+    <!-- Drop Shadows -->
+    <filter id="shadowBag" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#090E1A" flood-opacity="0.55"/>
+    </filter>
+
+    <filter id="shadowArrow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#C2410C" flood-opacity="0.45"/>
+    </filter>
+
+    <filter id="sparkleGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="glow"/>
+      <feComposite in="SourceGraphic" in2="glow" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Ambient Glow Behind Emblem -->
+  <circle cx="256" cy="265" r="215" fill="url(#bgGlow)"/>
+
+  <!-- SHOPPING BAG HANDLE (Centered, arched, with rounded caps) -->
+  <path d="M 188 190 C 188 108, 324 108, 324 190"
+        fill="none"
+        stroke="url(#handleGradient)"
+        stroke-width="24"
+        stroke-linecap="round"
+        filter="url(#shadowBag)"/>
+
+  <!-- HANDLE ATTACHMENT ACCENTS (Small metallic studs) -->
+  <circle cx="188" cy="190" r="10" fill="#60A5FA" opacity="0.9"/>
+  <circle cx="324" cy="190" r="10" fill="#A855F7" opacity="0.9"/>
+
+  <!-- MAIN BAG BODY -->
+  <path d="M 152 186
+           L 360 186
+           C 374 186, 385 196, 383 210
+           L 358 395
+           C 355 416, 337 432, 316 432
+           L 196 432
+           C 175 432, 157 416, 154 395
+           L 129 210
+           C 127 196, 138 186, 152 186 Z"
+        fill="url(#bagGradient)"
+        filter="url(#shadowBag)"/>
+
+  <!-- BAG TOP 3D SHEEN / HIGHLIGHT -->
+  <path d="M 152 186
+           L 360 186
+           C 374 186, 385 196, 383 210
+           L 374 278
+           C 310 250, 202 250, 138 278
+           L 129 210
+           C 127 196, 138 186, 152 186 Z"
+        fill="url(#bagSheen)"/>
+
+  <!-- BAG BOTTOM FOLD / CREASE (Subtle realism) -->
+  <path d="M 158 390 Q 256 420 354 390" fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="4"/>
+
+  <!-- MODERN MINIMALIST "G" MONOGRAM (Centered within bag body) -->
+  <!-- Center: cx=256, cy=308 -->
+  <g transform="translate(256, 308)" filter="url(#shadowBag)">
+    <!-- Crisp bold modern geometric G -->
+    <path d="M 32 -54
+             C -24 -54, -68 -18, -68 32
+             C -68 82, -24 118, 32 118
+             C 74 118, 102 92, 106 52
+             L 26 52
+             L 26 24
+             L 132 24
+             C 134 82, 94 146, 32 146
+             C -44 146, -100 96, -100 32
+             C -100 -32, -44 -82, 32 -82
+             C 72 -82, 104 -64, 124 -36
+             L 96 -12
+             C 80 -38, 58 -54, 32 -54 Z"
+          fill="#FFFFFF"/>
+  </g>
+
+  <!-- DYNAMIC UPWARD CURVED SWOOSH / ARROW -->
+  <g filter="url(#shadowArrow)">
+    <!-- Sweeping Tail wrapping gracefully from under the bag to top-right -->
+    <path d="M 104 392
+             C 142 442, 238 468, 332 434
+             C 382 416, 422 376, 442 320
+             C 454 286, 458 250, 452 216
+             C 438 244, 416 268, 388 286
+             C 362 302, 334 312, 304 318
+             C 342 334, 380 340, 412 328
+             C 392 376, 334 408, 268 412
+             C 188 416, 126 394, 104 392 Z"
+          fill="url(#arrowGradient)"/>
+
+    <!-- Sharp Arrow Head launching up-right -->
+    <path d="M 454 165
+             L 488 248
+             L 444 234
+             L 412 276
+             Z"
+          fill="url(#arrowGradient)"/>
+  </g>
+
+  <!-- DISCOVERY SPARKLE 1 (Top-Right, Magic Curation Accent) -->
+  <g transform="translate(424, 134)" filter="url(#sparkleGlow)">
+    <path d="M 0 -38 
+             C 4 -12, 12 -4, 38 0 
+             C 12 4, 4 12, 0 38 
+             C -4 12, -12 4, -38 0 
+             C -12 -4, -4 -12, 0 -38 Z" 
+          fill="url(#sparkleGradient)"/>
+    <circle cx="0" cy="0" r="6" fill="#FFFFFF"/>
+  </g>
+
+  <!-- DISCOVERY SPARKLE 2 (Top-Left Accent) -->
+  <g transform="translate(126, 154)" opacity="0.9">
+    <path d="M 0 -18 
+             C 2 -6, 6 -2, 18 0 
+             C 6 2, 2 6, 0 18 
+             C -2 6, -6 2, -18 0 
+             C -6 -2, -2 -6, 0 -18 Z" 
+          fill="url(#sparkleGradient)"/>
+  </g>
+</svg>

@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 240" width="960" height="240">
+  <defs>
+    <radialGradient id="hGlow" cx="18%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8B5CF6" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="hBagGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="40%" stop-color="#4F46E5"/>
+      <stop offset="80%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#9333EA"/>
+    </linearGradient>
+
+    <linearGradient id="hHandleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#93C5FD"/>
+      <stop offset="50%" stop-color="#C4B5FD"/>
+      <stop offset="100%" stop-color="#DDD6FE"/>
+    </linearGradient>
+
+    <linearGradient id="hArrowGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#EA580C"/>
+      <stop offset="45%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#FBBF24"/>
+    </linearGradient>
+
+    <linearGradient id="hTextAmazeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#60A5FA"/>
+      <stop offset="45%" stop-color="#818CF8"/>
+      <stop offset="100%" stop-color="#A855F7"/>
+    </linearGradient>
+
+    <linearGradient id="hSparkleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FEF08A"/>
+      <stop offset="50%" stop-color="#FBBF24"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </linearGradient>
+
+    <filter id="hShadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+
+    <filter id="hDotGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <circle cx="120" cy="120" r="110" fill="url(#hGlow)"/>
+
+  <!-- EMBLEM ICON SCALED (Centered at x=120, y=120) -->
+  <g transform="translate(16, 16) scale(0.407)" filter="url(#hShadow)">
+    <!-- Handle -->
+    <path d="M 188 190 C 188 108, 324 108, 324 190" fill="none" stroke="url(#hHandleGrad)" stroke-width="24" stroke-linecap="round"/>
+    
+    <!-- Bag -->
+    <path d="M 152 186 L 360 186 C 374 186, 385 196, 383 210 L 358 395 C 355 416, 337 432, 316 432 L 196 432 C 175 432, 157 416, 154 395 L 129 210 C 127 196, 138 186, 152 186 Z" fill="url(#hBagGrad)"/>
+
+    <!-- Monogram G -->
+    <g transform="translate(256, 308)">
+      <path d="M 32 -54 C -24 -54, -68 -18, -68 32 C -68 82, -24 118, 32 118 C 74 118, 102 92, 106 52 L 26 52 L 26 24 L 132 24 C 134 82, 94 146, 32 146 C -44 146, -100 96, -100 32 C -100 -32, -44 -82, 32 -82 C 72 -82, 104 -64, 124 -36 L 96 -12 C 80 -38, 58 -54, 32 -54 Z" fill="#FFFFFF"/>
+    </g>
+
+    <!-- Arrow -->
+    <path d="M 104 392 C 142 442, 238 468, 332 434 C 382 416, 422 376, 442 320 C 454 286, 458 250, 452 216 C 438 244, 416 268, 388 286 C 362 302, 334 312, 304 318 C 342 334, 380 340, 412 328 C 392 376, 334 408, 268 412 C 188 416, 126 394, 104 392 Z" fill="url(#hArrowGrad)"/>
+    <path d="M 454 165 L 488 248 L 444 234 L 412 276 Z" fill="url(#hArrowGrad)"/>
+
+    <!-- Sparkle -->
+    <g transform="translate(424, 134)">
+      <path d="M 0 -38 C 4 -12, 12 -4, 38 0 C 12 4, 4 12, 0 38 C -4 12, -12 4, -38 0 C -12 -4, -4 -12, 0 -38 Z" fill="url(#hSparkleGrad)"/>
+      <circle cx="0" cy="0" r="6" fill="#FFFFFF"/>
+    </g>
+  </g>
+
+  <!-- BRAND NAME TYPOGRAPHY -->
+  <text x="250" y="130" font-family="-apple-system, BlinkMacSystemFont, 'Montserrat', 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="92" letter-spacing="-1.5">
+    <tspan fill="#F8FAFC">Go</tspan>
+    <tspan fill="url(#hTextAmazeGrad)">Amaze</tspan>
+  </text>
+
+  <!-- AMBER ACCENT SPARKLE OVER "Amaze" -->
+  <circle cx="704" cy="68" r="9" fill="url(#hSparkleGrad)" filter="url(#hDotGlow)"/>
+
+  <!-- MODERN LETTER-SPACED TAGLINE -->
+  <text x="254" y="178" font-family="-apple-system, BlinkMacSystemFont, 'Poppins', 'Segoe UI', sans-serif" font-weight="700" font-size="20" fill="#94A3B8" letter-spacing="4.5">
+    SMART PICKS <tspan fill="#F97316" font-weight="900">•</tspan> CURATED ESSENTIALS
+  </text>
+</svg>
