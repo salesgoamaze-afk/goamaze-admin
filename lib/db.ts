@@ -343,6 +343,87 @@ export const db = {
     return created ? formatProduct(created) : null;
   },
 
+  async checkExistingAsins(asins: string[]): Promise<string[]> {
+    if (!asins || asins.length === 0) return [];
+    const supabase = getSupabase();
+    if (supabase) {
+      const { data, error } = await supabase.from("products").select("id, affiliateLink");
+      if (error || !data) return [];
+      const found: string[] = [];
+      for (const asin of asins) {
+        const asinLower = asin.toLowerCase();
+        const exists = data.some(
+          (p: any) =>
+            p.id?.toLowerCase().includes(asinLower) ||
+            p.affiliateLink?.toLowerCase().includes(asinLower)
+        );
+        if (exists) found.push(asin);
+      }
+      return found;
+    }
+
+    const local = (productsJsonFallback as any[]) || [];
+    return asins.filter((asin) => {
+      const asinLower = asin.toLowerCase();
+      return local.some(
+        (p: any) =>
+          String(p.id).toLowerCase().includes(asinLower) ||
+          String(p.affiliateLink || "").toLowerCase().includes(asinLower)
+      );
+    });
+  },
+
+  async createProductsBatch(records: CreateProductInput[]): Promise<{ added: ProductRecord[]; count: number }> {
+    if (!records || records.length === 0) return { added: [], count: 0 };
+    const supabase = getSupabase();
+    const now = new Date().toISOString();
+
+    const preparedRecords = records.map((data, index) => {
+      const id = data.id || `prod_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 6)}`;
+      const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
+      const primaryImage = data.image || imagesArray[0] || "";
+
+      return {
+        id,
+        title: data.title,
+        subtitle: data.subtitle || data.title,
+        description: data.description || "",
+        price: data.price,
+        originalPrice: data.originalPrice || data.price,
+        unitPrice: data.unitPrice || "",
+        category: data.category,
+        image: primaryImage,
+        images: imagesArray,
+        instagramUrl: data.instagramUrl || "",
+        affiliateLink: data.affiliateLink,
+        badge: data.badge || "New",
+        rating: data.rating !== undefined ? Number(data.rating) : 4.5,
+        reviews: data.reviews !== undefined ? Number(data.reviews) : 0,
+        featured: Boolean(data.featured),
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+
+    if (supabase) {
+      const { data: created, error } = await supabase
+        .from("products")
+        .insert(preparedRecords)
+        .select();
+
+      if (error) {
+        console.error("[Supabase createProductsBatch error]", error);
+        throw new Error(error.message);
+      }
+
+      const added = (created || []).map(formatProduct);
+      return { added, count: added.length };
+    }
+
+    const added = preparedRecords.map(formatProduct);
+    return { added, count: added.length };
+  },
+
   async updateProduct(id: string | number, data: ProductInput): Promise<ProductRecord | null> {
     const supabase = getSupabase();
     const idStr = String(id).trim();

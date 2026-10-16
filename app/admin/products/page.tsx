@@ -163,6 +163,18 @@ export default function AdminProductsPage() {
           >
             {syncing ? "🔄 Syncing…" : "🔄 Sync Catalogue"}
           </button>
+          <Link href="/admin/amazon-import" style={{
+            display: "inline-flex", alignItems: "center", gap: "8px",
+            padding: "11px 18px", borderRadius: "12px",
+            background: "rgba(249,115,22,0.15)",
+            border: "1px solid rgba(249,115,22,0.35)",
+            color: "#FB923C",
+            textDecoration: "none",
+            fontSize: "0.87rem", fontWeight: 700,
+            transition: "all 0.2s ease",
+          }}>
+            🛒 Amazon Creator
+          </Link>
           <Link href="/admin/products/new" style={{
             display: "inline-flex", alignItems: "center", gap: "8px",
             padding: "11px 22px", borderRadius: "12px",
