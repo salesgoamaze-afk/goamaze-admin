@@ -175,16 +175,6 @@ export default function AdminProductsPage() {
           }}>
             🛒 Amazon Creator
           </Link>
-          <Link href="/admin/products/new" style={{
-            display: "inline-flex", alignItems: "center", gap: "8px",
-            padding: "11px 22px", borderRadius: "12px",
-            background: "linear-gradient(135deg,#3B82F6,#8B5CF6)",
-            color: "white", textDecoration: "none",
-            fontSize: "0.87rem", fontWeight: 700,
-            boxShadow: "0 6px 20px rgba(99,102,241,0.35)",
-          }}>
-            ➕ Add Product
-          </Link>
         </div>
       </div>
 

@@ -263,6 +263,7 @@ function normalizeAmazonItem(item: any, fallbackCategory: string, partnerTag: st
     features,
     brand,
     featured: false,
+    instagramUrl: "",
   };
 }
 

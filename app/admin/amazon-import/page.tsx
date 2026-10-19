@@ -30,6 +30,7 @@ interface AmazonProduct {
   features: string[];
   brand?: string;
   featured?: boolean;
+  instagramUrl?: string;
 }
 
 const BADGE_OPTIONS = [
@@ -233,6 +234,7 @@ export default function AmazonImportPage() {
       rating: edits.rating !== undefined ? Number(edits.rating) : Number(p.rating || 4.5),
       reviews: edits.reviews !== undefined ? Number(edits.reviews) : Number(p.reviews || 0),
       featured: edits.featured !== undefined ? edits.featured : Boolean(p.featured),
+      instagramUrl: edits.instagramUrl !== undefined ? edits.instagramUrl : (p.instagramUrl || ""),
     };
   };
 
@@ -304,6 +306,7 @@ export default function AmazonImportPage() {
         rating: effective.rating,
         reviews: effective.reviews,
         featured: Boolean(effective.featured),
+        instagramUrl: effective.instagramUrl?.trim() || "",
       };
 
       const res = await fetch("/api/products", {
@@ -357,6 +360,7 @@ export default function AmazonImportPage() {
         rating: item.rating,
         reviews: item.reviews,
         featured: Boolean(item.featured),
+        instagramUrl: item.instagramUrl?.trim() || "",
       }));
 
     try {
@@ -1694,6 +1698,52 @@ export default function AmazonImportPage() {
                         ))}
                       </select>
                     </div>
+                  </div>
+
+                  {/* Instagram Reel / Post URL (Optional) */}
+                  <div style={{ marginBottom: "14px" }}>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "0.8rem",
+                        fontWeight: 700,
+                        color: "#F8FAFC",
+                        marginBottom: "6px",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      Instagram Reel / Post URL (Optional){" "}
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          color: "#94A3B8",
+                          fontWeight: 400,
+                        }}
+                      >
+                        (If empty, automatically redirects to your GoAmaze Instagram Channel)
+                      </span>
+                    </label>
+                    <input
+                      type="url"
+                      value={effective.instagramUrl || ""}
+                      onChange={(e) => updateProductField(p.asin, "instagramUrl", e.target.value)}
+                      placeholder="https://www.instagram.com/reel/... (optional)"
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        borderRadius: "10px",
+                        background: "rgba(15, 23, 42, 0.7)",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        color: "#F8FAFC",
+                        fontSize: "0.84rem",
+                        outline: "none",
+                        boxSizing: "border-box",
+                        fontFamily: "'Poppins', sans-serif",
+                        transition: "border-color 0.2s ease",
+                      }}
+                      onFocus={(e) => (e.target.style.borderColor = "rgba(139, 92, 246, 0.5)")}
+                      onBlur={(e) => (e.target.style.borderColor = "rgba(255, 255, 255, 0.12)")}
+                    />
                   </div>
 
                   {/* Features Bullets (Foldable Preview) */}
