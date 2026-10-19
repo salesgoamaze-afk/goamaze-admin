@@ -69,13 +69,27 @@ const AMAZON_DEPARTMENTS = [
   "Watches",
 ];
 
+export const STOREFRONT_THEMES = [
+  { name: "Festival Special - Diwali", icon: "🪔", keywords: "diwali decoration lights festive gifts diyas" },
+  { name: "Smart Kitchen", icon: "🍳", keywords: "smart kitchen appliances tools organizers gadget" },
+  { name: "Aesthetic Living", icon: "🛋️", keywords: "aesthetic home decor living room modern lamp decoration" },
+  { name: "Desk Setup", icon: "🖥️", keywords: "desk setup workstation ergonomics desk mat organizer stand" },
+  { name: "Cozy Wellness", icon: "🕯️", keywords: "scented candles aromatherapy wellness diffuser relaxation" },
+  { name: "Coffee Corner", icon: "☕", keywords: "coffee maker coffee mug frother coffee station accessories" },
+  { name: "Green Living", icon: "🌿", keywords: "indoor plants planters pots eco friendly garden decor" },
+  { name: "Gaming Zone", icon: "🎮", keywords: "gaming setup accessories rgb mechanical keyboard mousepad" },
+  { name: "Study Space", icon: "📚", keywords: "study lamp table organizers bookshelf stationery accessories" },
+  { name: "Miscellaneous", icon: "✨", keywords: "trending gadgets lifestyle" },
+  { name: "Apparel", icon: "👕", keywords: "clothing apparel fashion wear outfit" },
+];
+
 export default function AmazonImportPage() {
   // Mode: "category" or "asin"
   const [mode, setMode] = useState<"category" | "asin">("category");
 
   // Filter form states
   const [categories, setCategories] = useState<Category[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState("Kitchen Appliances");
+  const [selectedCategory, setSelectedCategory] = useState("Smart Kitchen");
   const [keywords, setKeywords] = useState("");
   const [asinsInput, setAsinsInput] = useState("");
   const [limit, setLimit] = useState(20); // Default to 20 products
@@ -136,7 +150,11 @@ export default function AmazonImportPage() {
   };
 
   // Fetch products via Amazon Creator API
-  const handleFetchProducts = async (pageOverride?: number) => {
+  const handleFetchProducts = async (
+    pageOverride?: number,
+    categoryOverride?: string,
+    keywordsOverride?: string
+  ) => {
     setLoading(true);
     setNotice(null);
     setSelectedAsins(new Set());
@@ -145,13 +163,16 @@ export default function AmazonImportPage() {
     const targetAmazonPage = pageOverride || (pageOverride === 1 ? 1 : amazonPage);
     if (pageOverride) setAmazonPage(pageOverride);
 
+    const effectiveCat = categoryOverride !== undefined ? categoryOverride : selectedCategory;
+    const effectiveKw = keywordsOverride !== undefined ? keywordsOverride : keywords;
+
     try {
       let endpoint = "";
 
       if (mode === "category") {
         const queryParams = new URLSearchParams();
-        if (selectedCategory) queryParams.set("category", selectedCategory);
-        if (keywords.trim()) queryParams.set("keywords", keywords.trim());
+        if (effectiveCat) queryParams.set("category", effectiveCat);
+        if (effectiveKw.trim()) queryParams.set("keywords", effectiveKw.trim());
         queryParams.set("limit", String(limit));
         queryParams.set("page", String(targetAmazonPage));
         if (apiSortBy) queryParams.set("sortBy", apiSortBy);
@@ -219,6 +240,13 @@ export default function AmazonImportPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Switch theme pill and auto-fetch matching products immediately
+  const handleSelectTheme = (themeName: string, themeKeywords: string) => {
+    setSelectedCategory(themeName);
+    setKeywords(themeKeywords);
+    handleFetchProducts(1, themeName, themeKeywords);
   };
 
   // Helper to get effective product data with inline edits applied
@@ -614,14 +642,100 @@ export default function AmazonImportPage() {
           }}
         >
           {mode === "category" ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-                gap: "16px",
-                alignItems: "end",
-              }}
-            >
+            <>
+              {/* Storefront Themes Bar (matching user's uploaded image) */}
+              <div
+                style={{
+                  background: "rgba(10, 20, 38, 0.8)",
+                  border: "1px solid rgba(59, 130, 246, 0.22)",
+                  borderRadius: "18px",
+                  padding: "16px 20px",
+                  marginBottom: "20px",
+                  boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "14px",
+                    flexWrap: "wrap",
+                    gap: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "1.1rem" }}>🎯</span>
+                    <span
+                      style={{
+                        fontSize: "0.82rem",
+                        fontWeight: 800,
+                        color: "#93C5FD",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                      }}
+                    >
+                      Storefront Themes (Click to Auto-Fetch & Filter)
+                    </span>
+                  </div>
+                  <span style={{ fontSize: "0.75rem", color: "#64748B" }}>
+                    Select any theme to instantly load curated Creator API products
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                    alignItems: "center",
+                  }}
+                >
+                  {STOREFRONT_THEMES.map((theme) => {
+                    const isActive =
+                      selectedCategory.toLowerCase() === theme.name.toLowerCase() ||
+                      (theme.name === "Apparel" && selectedCategory.toLowerCase() === "apparel");
+
+                    return (
+                      <button
+                        key={theme.name}
+                        type="button"
+                        onClick={() => handleSelectTheme(theme.name, theme.keywords)}
+                        style={{
+                          padding: "8px 18px",
+                          borderRadius: "9999px",
+                          fontSize: "0.86rem",
+                          fontWeight: isActive ? 800 : 600,
+                          cursor: "pointer",
+                          border: isActive ? "1px solid #3B82F6" : "1px solid rgba(255, 255, 255, 0.12)",
+                          background: isActive
+                            ? "linear-gradient(135deg, #1D4ED8 0%, #1E40AF 100%)"
+                            : "rgba(255, 255, 255, 0.04)",
+                          color: isActive ? "#FFFFFF" : "#CBD5E1",
+                          boxShadow: isActive ? "0 0 16px rgba(59, 130, 246, 0.45)" : "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                        }}
+                        title={`Fetch products for ${theme.name}`}
+                      >
+                        <span>{theme.icon}</span>
+                        <span>{theme.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+                  gap: "16px",
+                  alignItems: "end",
+                }}
+              >
               {/* Category Dropdown */}
               <div>
                 <label
@@ -804,6 +918,7 @@ export default function AmazonImportPage() {
                 </button>
               </div>
             </div>
+          </>
           ) : (
             <div>
               <label

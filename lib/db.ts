@@ -142,21 +142,37 @@ export interface CreateBlogInput {
 }
 
 const DEFAULT_CATEGORY_ICONS: Record<string, string> = {
-  "Food Items": "🍯",
+  "Festival Special - Diwali": "🪔",
+  "Smart Kitchen": "🍳",
+  "Aesthetic Living": "🛋️",
+  "Desk Setup": "🖥️",
+  "Cozy Wellness": "🕯️",
+  "Coffee Corner": "☕",
+  "Green Living": "🌿",
+  "Gaming Zone": "🎮",
+  "Study Space": "📚",
+  "Miscellaneous": "✨",
+  // Legacy / fallback categories
   "Kitchen Appliances": "🍳",
   "Home Decoration": "🛋️",
   "Lifestyle Products": "✨",
   "Study & Workspace": "🖥️",
   "Gym": "🏋️",
+  "Food Items": "🍯",
+  "Apparel": "👕",
 };
 
 const DEFAULT_CATEGORIES: CategoryRecord[] = [
-  { id: "cat_food", name: "Food Items", icon: "🍯", slug: "food-items", createdAt: new Date().toISOString() },
-  { id: "cat_kitchen", name: "Kitchen Appliances", icon: "🍳", slug: "kitchen-appliances", createdAt: new Date().toISOString() },
-  { id: "cat_home", name: "Home Decoration", icon: "🛋️", slug: "home-decoration", createdAt: new Date().toISOString() },
-  { id: "cat_lifestyle", name: "Lifestyle Products", icon: "✨", slug: "lifestyle-products", createdAt: new Date().toISOString() },
-  { id: "cat_workspace", name: "Study & Workspace", icon: "🖥️", slug: "study-workspace", createdAt: new Date().toISOString() },
-  { id: "cat_gym", name: "Gym", icon: "🏋️", slug: "gym", createdAt: new Date().toISOString() },
+  { id: "cat_festival_diwali", name: "Festival Special - Diwali", icon: "🪔", slug: "festival-special-diwali", createdAt: new Date().toISOString() },
+  { id: "cat_smart_kitchen", name: "Smart Kitchen", icon: "🍳", slug: "smart-kitchen", createdAt: new Date().toISOString() },
+  { id: "cat_aesthetic_living", name: "Aesthetic Living", icon: "🛋️", slug: "aesthetic-living", createdAt: new Date().toISOString() },
+  { id: "cat_desk_setup", name: "Desk Setup", icon: "🖥️", slug: "desk-setup", createdAt: new Date().toISOString() },
+  { id: "cat_cozy_wellness", name: "Cozy Wellness", icon: "🕯️", slug: "cozy-wellness", createdAt: new Date().toISOString() },
+  { id: "cat_coffee_corner", name: "Coffee Corner", icon: "☕", slug: "coffee-corner", createdAt: new Date().toISOString() },
+  { id: "cat_green_living", name: "Green Living", icon: "🌿", slug: "green-living", createdAt: new Date().toISOString() },
+  { id: "cat_gaming_zone", name: "Gaming Zone", icon: "🎮", slug: "gaming-zone", createdAt: new Date().toISOString() },
+  { id: "cat_study_space", name: "Study Space", icon: "📚", slug: "study-space", createdAt: new Date().toISOString() },
+  { id: "cat_miscellaneous", name: "Miscellaneous", icon: "✨", slug: "miscellaneous", createdAt: new Date().toISOString() },
 ];
 
 // FORMATTING HELPERS

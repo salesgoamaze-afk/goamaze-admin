@@ -52,47 +52,83 @@ const VALID_SEARCH_INDICES = new Set([
 
 // Friendly / store category mappings to Amazon SearchIndex values
 const CATEGORY_SEARCH_INDEX_MAP: Record<string, string> = {
-  // GoAmaze store categories
+  // GoAmaze Store Themes
+  "festival special - diwali": "HomeAndKitchen",
+  "festival special": "HomeAndKitchen",
+  "diwali": "HomeAndKitchen",
+
+  "smart kitchen": "HomeAndKitchen",
   "kitchen appliances": "HomeAndKitchen",
   "kitchen": "HomeAndKitchen",
-  "food items": "GroceryAndGourmetFoods",
-  "food": "GroceryAndGourmetFoods",
-  "grocery": "GroceryAndGourmetFoods",
+
+  "aesthetic living": "HomeAndKitchen",
   "home decoration": "HomeAndKitchen",
   "home decor": "HomeAndKitchen",
   "home": "HomeAndKitchen",
-  "lifestyle products": "HealthAndPersonalCare",
-  "lifestyle": "HealthAndPersonalCare",
+
+  "desk setup": "OfficeProducts",
+  "workstation": "OfficeProducts",
   "study & workspace": "OfficeProducts",
   "study and workspace": "OfficeProducts",
   "workspace": "OfficeProducts",
+
+  "cozy wellness": "HomeAndKitchen",
+  "lifestyle products": "HealthAndPersonalCare",
+  "lifestyle": "HealthAndPersonalCare",
+  "wellness": "HealthAndPersonalCare",
+
+  "coffee corner": "HomeAndKitchen",
+  "coffee": "HomeAndKitchen",
+
+  // Note: GardenAndOutdoors is invalid in Amazon India; HomeAndKitchen is the valid index covering planters & gardening
+  "green living": "HomeAndKitchen",
+  "garden": "HomeAndKitchen",
+  "gardening": "HomeAndKitchen",
+  "plants": "HomeAndKitchen",
+
+  "gaming zone": "VideoGames",
+  "gaming": "VideoGames",
+  "video games": "VideoGames",
+
+  "study space": "OfficeProducts",
+  "study": "OfficeProducts",
   "office": "OfficeProducts",
+
+  "miscellaneous": "All",
+  "general": "All",
+  "trending": "All",
+
+  // Apparel & Fashion categories
+  "apparel": "Apparel",
+  "clothing": "Apparel",
+  "fashion": "Apparel",
+  "clothes": "Apparel",
+  "mens fashion": "Apparel",
+  "womens fashion": "Apparel",
+  "shoes": "ShoesAndHandbags",
+  "shoes and handbags": "ShoesAndHandbags",
+
+  // Other departments
+  "food items": "GroceryAndGourmetFoods",
+  "food": "GroceryAndGourmetFoods",
+  "grocery": "GroceryAndGourmetFoods",
   "gym": "SportsAndOutdoors",
   "fitness": "SportsAndOutdoors",
   "sports": "SportsAndOutdoors",
-
-  // Generic categories
   "electronics": "Electronics",
   "appliances": "Appliances",
-  "fashion": "Apparel",
-  "clothing": "Apparel",
-  "apparel": "Apparel",
   "beauty": "Beauty",
+  "personal care": "HealthAndPersonalCare",
+  "health": "HealthAndPersonalCare",
   "books": "Books",
   "computers": "Computers",
   "furniture": "Furniture",
-  "garden": "GardenAndOutdoors",
-  "personal care": "HealthAndPersonalCare",
-  "health": "HealthAndPersonalCare",
   "jewellery": "Jewellery",
   "jewelry": "Jewellery",
   "luggage": "LuggageAndBags",
   "bags": "LuggageAndBags",
-  "shoes": "ShoesAndHandbags",
   "toys": "ToysAndGames",
   "toys and games": "ToysAndGames",
-  "video games": "VideoGames",
-  "gaming": "VideoGames",
   "watches": "Watches",
   "baby": "Baby",
   "pet supplies": "PetSupplies",
@@ -117,19 +153,100 @@ function resolveSearchIndex(category?: string | null, explicitIndex?: string | n
 
   const cleanCategory = category.trim().toLowerCase();
 
+  // Check alias dictionary first (handles themes like "green living" -> "HomeAndKitchen")
+  if (CATEGORY_SEARCH_INDEX_MAP[cleanCategory]) {
+    return CATEGORY_SEARCH_INDEX_MAP[cleanCategory];
+  }
+
   // Check if the category itself directly matches a valid search index
   const directMatch = Array.from(VALID_SEARCH_INDICES).find(
     (idx) => idx.toLowerCase() === cleanCategory
   );
   if (directMatch) return directMatch;
 
-  // Check alias dictionary
-  if (CATEGORY_SEARCH_INDEX_MAP[cleanCategory]) {
-    return CATEGORY_SEARCH_INDEX_MAP[cleanCategory];
-  }
-
   // Fallback to "All" if no specific index matched
   return "All";
+}
+
+/**
+ * Resolves high-relevance semantic search keywords for categories and themes
+ * when the caller leaves keywords blank. Prevents Amazon API from returning
+ * irrelevant items (e.g. body lotion for Apparel).
+ */
+function resolveCategoryDefaultKeywords(category?: string | null, resolvedIndex?: string): string {
+  const clean = (category || "").trim().toLowerCase();
+
+  // Curated theme defaults specifically tested against Amazon Creators API
+  if (clean.includes("diwali") || clean.includes("festival")) {
+    return "diwali decoration lights festive gifts diyas";
+  }
+  if (clean.includes("smart kitchen") || clean.includes("kitchen")) {
+    return "smart kitchen appliances tools organizers gadget";
+  }
+  if (clean.includes("aesthetic living") || clean.includes("home decor") || clean.includes("home decoration")) {
+    return "aesthetic home decor living room modern lamp decoration";
+  }
+  if (clean.includes("desk setup") || clean.includes("workstation")) {
+    return "desk setup workstation ergonomics desk mat organizer stand";
+  }
+  if (clean.includes("cozy wellness") || clean.includes("wellness")) {
+    return "scented candles aromatherapy wellness diffuser relaxation";
+  }
+  if (clean.includes("coffee corner") || clean.includes("coffee")) {
+    return "coffee maker coffee mug frother coffee station accessories";
+  }
+  if (clean.includes("green living") || clean.includes("plant") || clean.includes("garden")) {
+    return "indoor plants planters pots eco friendly garden decor";
+  }
+  if (clean.includes("gaming zone") || clean.includes("gaming") || clean.includes("video games")) {
+    return "gaming setup accessories rgb mechanical keyboard mousepad";
+  }
+  if (clean.includes("study space") || clean.includes("study")) {
+    return "study lamp table organizers bookshelf stationery accessories";
+  }
+  if (clean.includes("apparel") || clean.includes("clothing") || clean.includes("fashion")) {
+    return "clothing apparel fashion wear outfit";
+  }
+  if (clean.includes("miscellaneous")) {
+    return "trending gadgets lifestyle";
+  }
+  if (clean.includes("gym") || clean.includes("fitness") || clean.includes("sports")) {
+    return "gym fitness workout equipment accessories";
+  }
+  if (clean.includes("food") || clean.includes("grocery")) {
+    return "organic gourmet snacks healthy food";
+  }
+  if (clean.includes("beauty")) {
+    return "skincare beauty cosmetics";
+  }
+  if (clean.includes("shoes")) {
+    return "shoes sneakers footwear";
+  }
+
+  // Fallbacks by search index
+  switch (resolvedIndex) {
+    case "Apparel":
+      return "clothing apparel fashion wear outfit";
+    case "HomeAndKitchen":
+      return "home decor kitchen appliances accessories";
+    case "OfficeProducts":
+      return "office desk workstation stationery";
+    case "VideoGames":
+      return "gaming accessories gear";
+    case "Electronics":
+      return "electronics gadgets tech";
+    case "Computers":
+      return "computer accessories peripherals";
+    case "Beauty":
+      return "skincare beauty cosmetics";
+    case "ShoesAndHandbags":
+      return "footwear shoes bags";
+    case "SportsAndOutdoors":
+      return "sports fitness gym";
+    case "All":
+    default:
+      return clean && clean !== "all" ? clean : "trending gadgets lifestyle";
+  }
 }
 
 const getAccessToken = getCreatorAccessToken;
@@ -223,10 +340,10 @@ async function handleAmazonCatalogRequest(params: {
   // Otherwise, use searchItems filtered with category (SearchIndex / BrowseNodeId)
   const resolvedSearchIndex = resolveSearchIndex(category, explicitSearchIndex);
 
-  // If SearchIndex is "All", Amazon requires keywords. If not provided, fallback to category name.
+  // Auto-resolve high-relevance semantic keywords if user didn't specify custom keywords
   let effectiveKeywords = keywords?.trim();
-  if (!effectiveKeywords && resolvedSearchIndex === "All") {
-    effectiveKeywords = category?.trim() || "trending";
+  if (!effectiveKeywords) {
+    effectiveKeywords = resolveCategoryDefaultKeywords(category, resolvedSearchIndex);
   }
 
   const requestedLimit = Math.min(Math.max(1, itemCount || 10), 50);
