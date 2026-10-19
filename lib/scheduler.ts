@@ -1,7 +1,26 @@
 import { syncAllProductsFromCreatorApi, getLastSyncReport, SyncAllResult } from "./amazon-creator";
 
-// Default interval: 6 hours (in milliseconds)
-const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Default interval: 24 hours (in milliseconds)
+const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Calculates the next occurrence of 4:00 AM IST (which is 22:30 UTC).
+ * Indian Standard Time is UTC+05:30, so 4:00 AM IST = 22:30 UTC of the previous UTC day.
+ */
+export function getNext4AmRunTime(): Date {
+  const now = new Date();
+  const target = new Date(now);
+
+  // Set to 22:30:00.000 UTC
+  target.setUTCHours(22, 30, 0, 0);
+
+  // If 22:30 UTC has already passed for today, advance to tomorrow's 22:30 UTC
+  if (target.getTime() <= now.getTime()) {
+    target.setUTCDate(target.getUTCDate() + 1);
+  }
+
+  return target;
+}
 
 interface SchedulerState {
   enabled: boolean;
@@ -19,7 +38,7 @@ const schedulerState: SchedulerState = globalForScheduler.__productScheduler || 
   enabled: true,
   intervalMs: DEFAULT_INTERVAL_MS,
   lastRunTime: null,
-  nextRunTime: null,
+  nextRunTime: getNext4AmRunTime().toISOString(),
   isRunning: false,
   timerRef: null,
 };
@@ -27,7 +46,7 @@ const schedulerState: SchedulerState = globalForScheduler.__productScheduler || 
 globalForScheduler.__productScheduler = schedulerState;
 
 /**
- * Executes a single scheduled sync pass.
+ * Executes a single scheduled sync pass across all products.
  */
 export async function executeScheduledSync(): Promise<SyncAllResult> {
   if (schedulerState.isRunning) {
@@ -60,33 +79,43 @@ export async function executeScheduledSync(): Promise<SyncAllResult> {
     throw error;
   } finally {
     schedulerState.isRunning = false;
-    schedulerState.nextRunTime = new Date(Date.now() + schedulerState.intervalMs).toISOString();
+    // Always keep nextRunTime pointing to the upcoming 4:00 AM IST execution
+    schedulerState.nextRunTime = getNext4AmRunTime().toISOString();
   }
 }
 
 /**
- * Starts or restarts the in-process background scheduler timer.
+ * Starts or restarts the 24-hour daily scheduler timer targeting 4:00 AM IST.
  */
 export function startScheduler(intervalMs?: number) {
-  if (intervalMs && intervalMs > 0) {
-    schedulerState.intervalMs = intervalMs;
-  }
-
   if (schedulerState.timerRef) {
-    clearInterval(schedulerState.timerRef);
+    clearTimeout(schedulerState.timerRef);
     schedulerState.timerRef = null;
   }
 
   schedulerState.enabled = true;
-  schedulerState.nextRunTime = new Date(Date.now() + schedulerState.intervalMs).toISOString();
+  schedulerState.intervalMs = intervalMs || DEFAULT_INTERVAL_MS;
 
-  schedulerState.timerRef = setInterval(() => {
-    executeScheduledSync().catch((err) => {
-      console.error("[Product Scheduler Interval Error]", err);
-    });
-  }, schedulerState.intervalMs);
+  const nextRun = getNext4AmRunTime();
+  schedulerState.nextRunTime = nextRun.toISOString();
 
-  console.log(`[Product Scheduler] In-process scheduler started. Next run at ${schedulerState.nextRunTime} (every ${Math.round(schedulerState.intervalMs / (1000 * 60 * 60))}h).`);
+  const msUntilNextRun = Math.max(1000, nextRun.getTime() - Date.now());
+
+  console.log(
+    `[Product Scheduler] Daily 24h scheduler armed. Next execution scheduled at ${schedulerState.nextRunTime} ` +
+    `(${nextRun.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST, in ${(msUntilNextRun / (1000 * 60 * 60)).toFixed(2)}h).`
+  );
+
+  schedulerState.timerRef = setTimeout(async () => {
+    try {
+      await executeScheduledSync();
+    } catch (err) {
+      console.error("[Product Scheduler Error during scheduled run]", err);
+    } finally {
+      // Re-arm timer for the next daily execution at 4:00 AM IST
+      startScheduler();
+    }
+  }, msUntilNextRun);
 }
 
 /**
@@ -96,10 +125,11 @@ export function getSchedulerStatus() {
   return {
     enabled: schedulerState.enabled,
     isRunning: schedulerState.isRunning,
-    intervalHours: Math.round(schedulerState.intervalMs / (1000 * 60 * 60)),
+    intervalHours: 24,
+    scheduleDescription: "Daily at 4:00 AM IST (Every 24h)",
     intervalMs: schedulerState.intervalMs,
     lastRunTime: schedulerState.lastRunTime,
-    nextRunTime: schedulerState.nextRunTime,
+    nextRunTime: schedulerState.nextRunTime || getNext4AmRunTime().toISOString(),
     lastReport: getLastSyncReport(),
   };
 }

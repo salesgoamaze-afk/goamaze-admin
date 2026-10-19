@@ -528,7 +528,7 @@ export default function AdminProductsPage() {
                     Product Attribute & Live Price Scheduler
                   </h3>
                   <p style={{ color: "#94A3B8", fontSize: "0.82rem", margin: "4px 0 0" }}>
-                    Automated background engine syncing live selling prices, M.R.P., offer discounts, and ratings via Amazon Creator API.
+                    Automated background engine syncing live selling prices, M.R.P., offer discounts, and ratings via Amazon Creator API once daily at 4:00 AM.
                   </p>
                 </div>
               </div>
@@ -567,7 +567,10 @@ export default function AdminProductsPage() {
               <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "14px", padding: "14px" }}>
                 <div style={{ fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textTransform: "uppercase" }}>Sync Frequency</div>
                 <div style={{ fontSize: "1rem", fontWeight: 800, color: "#F8FAFC", marginTop: "6px" }}>
-                  Every {schedulerStatus?.intervalHours || 6} Hours
+                  Daily at 4:00 AM
+                </div>
+                <div style={{ fontSize: "0.7rem", color: "#94A3B8", marginTop: "2px" }}>
+                  Once every 24 Hours
                 </div>
               </div>
 
@@ -575,7 +578,7 @@ export default function AdminProductsPage() {
                 <div style={{ fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textTransform: "uppercase" }}>Last Synced</div>
                 <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#CBD5E1", marginTop: "6px" }}>
                   {schedulerStatus?.lastRunTime
-                    ? new Date(schedulerStatus.lastRunTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                    ? new Date(schedulerStatus.lastRunTime).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
                     : "Not run yet"}
                 </div>
               </div>
@@ -584,8 +587,8 @@ export default function AdminProductsPage() {
                 <div style={{ fontSize: "0.72rem", color: "#94A3B8", fontWeight: 700, textTransform: "uppercase" }}>Next Scheduled Run</div>
                 <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#FB923C", marginTop: "6px" }}>
                   {schedulerStatus?.nextRunTime
-                    ? new Date(schedulerStatus.nextRunTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                    : "In ~6 hours"}
+                    ? new Date(schedulerStatus.nextRunTime).toLocaleString([], { dateStyle: "short", timeStyle: "short" })
+                    : "Tomorrow at 4:00 AM"}
                 </div>
               </div>
             </div>
@@ -815,7 +818,7 @@ export default function AdminProductsPage() {
                 External Webhook & Vercel Cron Endpoint
               </div>
               <p style={{ fontSize: "0.78rem", color: "#64748B", margin: "0 0 10px", lineHeight: 1.4 }}>
-                You can trigger automated runs from Vercel Crons, GitHub Actions, AWS EventBridge, or cron-job.org using this secure URL:
+                Configured in <code style={{ color: "#FB923C" }}>vercel.json</code> to trigger automatically once every 24 hours at 4:00 AM IST (<code style={{ color: "#94A3B8" }}>30 22 * * *</code>). You can also trigger runs externally using:
               </p>
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <input

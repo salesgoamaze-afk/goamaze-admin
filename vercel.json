@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/sync-products?secret=goamaze-secret",
-      "schedule": "0 */6 * * *"
+      "schedule": "30 22 * * *"
     }
   ]
 }
