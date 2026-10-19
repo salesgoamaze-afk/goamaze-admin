@@ -11,15 +11,10 @@ const GET_ITEMS_API_URL = "https://creatorsapi.amazon/catalog/v1/getItems";
 const DEFAULT_MARKETPLACE = process.env.AMAZON_MARKETPLACE || "www.amazon.in";
 const DEFAULT_PARTNER_TAG = process.env.AMAZON_PARTNER_TAG || "goamaze06-21";
 
+import { CREATOR_API_RESOURCES, normalizeCreatorItem, getCreatorAccessToken } from "@/lib/amazon-creator";
+
 // Default item metadata resources to request
-const DEFAULT_RESOURCES = [
-  "images.primary.large",
-  "itemInfo.title",
-  "itemInfo.features",
-  "offersV2.listings.price",
-  "customerReviews.count",
-  "customerReviews.starRating",
-];
+const DEFAULT_RESOURCES = CREATOR_API_RESOURCES;
 
 // Valid Amazon SearchIndex category values (for amazon.in and international catalogs)
 const VALID_SEARCH_INDICES = new Set([
@@ -137,135 +132,8 @@ function resolveSearchIndex(category?: string | null, explicitIndex?: string | n
   return "All";
 }
 
-// In-memory OAuth 2.0 Bearer token cache to avoid redundant token requests
-let tokenCache: { token: string; expiresAt: number } | null = null;
-
-async function getAccessToken(): Promise<string> {
-  const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt > now + 60000) {
-    return tokenCache.token;
-  }
-
-  const clientId = process.env.AMAZON_CLIENT_ID;
-  const clientSecret = process.env.AMAZON_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error("AMAZON_CLIENT_ID and AMAZON_CLIENT_SECRET must be configured in environment variables");
-  }
-
-  const tokenResponse = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      grant_type: "client_credentials",
-      client_id: clientId,
-      client_secret: clientSecret,
-      scope: "creatorsapi::default",
-    }),
-  });
-
-  const tokenData = await tokenResponse.json();
-
-  if (!tokenResponse.ok) {
-    const errorMsg = tokenData.error_description || tokenData.error || "Failed to obtain Amazon access token";
-    throw new Error(`Amazon authentication failed: ${errorMsg}`);
-  }
-
-  const expiresInSec = typeof tokenData.expires_in === "number" ? tokenData.expires_in : 3600;
-  tokenCache = {
-    token: tokenData.access_token,
-    expiresAt: now + expiresInSec * 1000,
-  };
-
-  return tokenData.access_token;
-}
-
-/**
- * Normalizes Amazon catalog item to a standardized product representation.
- */
-function normalizeAmazonItem(item: any, fallbackCategory: string, partnerTag: string) {
-  const asin = item.asin || item.id || "";
-  const title = item.itemInfo?.title?.displayValue || "";
-  const largeImg = item.images?.primary?.large?.url || "";
-  const mediumImg = item.images?.primary?.medium?.url || "";
-  const primaryImg = largeImg || mediumImg || "";
-
-  // Extract all variant / gallery images
-  const variantImgs = Array.isArray(item.images?.variants)
-    ? item.images.variants.map((v: any) => v.large?.url || v.medium?.url).filter(Boolean)
-    : [];
-  const images = Array.from(new Set([primaryImg, ...variantImgs].filter(Boolean)));
-
-  const features = item.itemInfo?.features?.displayValues || [];
-  const brand = item.itemInfo?.byLineInfo?.brand?.displayValue || item.itemInfo?.byLineInfo?.manufacturer?.displayValue || "";
-
-  const priceListing = item.offersV2?.listings?.[0];
-  const priceDisplay =
-    priceListing?.price?.display ||
-    (priceListing?.price?.moneyValue?.amount
-      ? `₹${Number(priceListing.price.moneyValue.amount).toLocaleString("en-IN")}`
-      : "");
-
-  // Calculate original price if savings are available
-  const currentAmount = priceListing?.price?.moneyValue?.amount ? Number(priceListing.price.moneyValue.amount) : 0;
-  const savingAmount = priceListing?.saving?.moneyValue?.amount ? Number(priceListing.saving.moneyValue.amount) : 0;
-  let originalPrice = priceDisplay || "";
-  if (currentAmount > 0 && savingAmount > 0) {
-    originalPrice = `₹${Math.round(currentAmount + savingAmount).toLocaleString("en-IN")}`;
-  }
-
-  const affiliateLink =
-    item.detailPageURL ||
-    `https://www.amazon.in/dp/${asin}?tag=${partnerTag}`;
-
-  const unitPrice = brand ? `${brand} Authentic` : (features[0] ? features[0].slice(0, 35) : "Standard Edition");
-
-  // Extract rating & review count from customerReviews if provided, or derive consistent scores
-  let rating = 4.5;
-  let reviews = 120;
-  if (item.customerReviews?.starRating?.value) {
-    rating = Math.round(Number(item.customerReviews.starRating.value) * 10) / 10;
-  } else if (item.rating) {
-    rating = Number(item.rating);
-  } else if (asin) {
-    const hash = asin.split("").reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-    // Varied ratings between 4.1 and 4.9
-    rating = Math.round((4.2 + (hash % 8) * 0.1) * 10) / 10;
-  }
-
-  if (item.customerReviews?.count) {
-    reviews = Number(item.customerReviews.count);
-  } else if (item.reviews) {
-    reviews = Number(item.reviews);
-  } else if (asin) {
-    const hash = asin.split("").reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-    reviews = 60 + (hash % 2450);
-  }
-
-  return {
-    asin,
-    id: `prod_amz_${asin.toLowerCase()}`,
-    title,
-    subtitle: features[0] || (title.length > 70 ? `${title.slice(0, 67)}…` : title),
-    description: features.length > 0 ? features.join(" • ") : title,
-    price: priceDisplay || "Check on Amazon",
-    originalPrice: originalPrice || priceDisplay || "Check on Amazon",
-    unitPrice,
-    image: primaryImg,
-    images: images.length > 0 ? images : (primaryImg ? [primaryImg] : []),
-    affiliateLink,
-    category: fallbackCategory,
-    badge: "Amazon Pick",
-    rating,
-    reviews,
-    features,
-    brand,
-    featured: false,
-    instagramUrl: "",
-  };
-}
+const getAccessToken = getCreatorAccessToken;
+const normalizeAmazonItem = normalizeCreatorItem;
 
 /**
  * Main handler to process product fetching through Amazon Creators API.

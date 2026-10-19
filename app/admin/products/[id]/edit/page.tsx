@@ -51,8 +51,46 @@ export default function EditProductPage({
   const [loading,    setLoading]    = useState(true);
   const [saving,     setSaving]     = useState(false);
   const [deleting,   setDeleting]   = useState(false);
+  const [fetchingPrice, setFetchingPrice] = useState(false);
   const [error,      setError]      = useState("");
   const [success,    setSuccess]    = useState("");
+
+  const handleRefreshFromCreator = async () => {
+    if (!form?.affiliateLink) {
+      setError("Please provide an Amazon Affiliate Link to fetch from Creator API.");
+      return;
+    }
+    const match = form.affiliateLink.match(/(?:dp|gp\/product|product|asin|d)\/([A-Z0-9]{10})/i);
+    const asin = match ? match[1].toUpperCase() : null;
+    if (!asin) {
+      setError("Could not extract a valid 10-character Amazon ASIN from the affiliate link.");
+      return;
+    }
+
+    setFetchingPrice(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/amazon?itemIds=${asin}`, { credentials: "include" });
+      const data = await res.json();
+      if (res.ok && data.products && data.products.length > 0) {
+        const item = data.products[0];
+        setForm(prev => prev ? {
+          ...prev,
+          price: item.price && item.price !== "Check on Amazon" ? item.price : prev.price,
+          originalPrice: item.originalPrice && item.originalPrice !== "Check on Amazon" ? item.originalPrice : prev.originalPrice,
+          rating: item.rating ? String(item.rating) : prev.rating,
+          reviews: item.reviews ? String(item.reviews) : prev.reviews,
+        } : null);
+        setSuccess(`✓ Updated price to ${item.price} (M.R.P. ${item.originalPrice}) from live Creator API!`);
+      } else {
+        setError("Failed to fetch live price from Creator API: " + (data.message || data.error || "Unknown"));
+      }
+    } catch (e: any) {
+      setError("Error: " + e.message);
+    } finally {
+      setFetchingPrice(false);
+    }
+  };
 
   // ── Fetch product + categories ────────────────────────────────────────────
   useEffect(() => {
@@ -460,7 +498,28 @@ export default function EditProductPage({
 
             {/* Affiliate Link */}
             <div>
-              <label style={labelStyle}>Amazon Affiliate Link *</label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <label style={{ ...labelStyle, margin: 0 }}>Amazon Affiliate Link *</label>
+                {form.affiliateLink && (
+                  <button
+                    type="button"
+                    onClick={handleRefreshFromCreator}
+                    disabled={fetchingPrice}
+                    style={{
+                      background: "rgba(249,115,22,0.18)",
+                      border: "1px solid rgba(249,115,22,0.4)",
+                      color: "#FB923C",
+                      padding: "3px 10px",
+                      borderRadius: "6px",
+                      fontSize: "0.74rem",
+                      fontWeight: 700,
+                      cursor: fetchingPrice ? "wait" : "pointer",
+                    }}
+                  >
+                    {fetchingPrice ? "🔄 Fetching…" : "⚡ Refresh Price from Creator API"}
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 required

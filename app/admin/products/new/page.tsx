@@ -48,11 +48,119 @@ export default function NewProductPage() {
   // Review Modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
 
+  // Creator API live price & attributes fetch state
+  const [asinInput, setAsinInput] = useState("");
+  const [fetchingCreator, setFetchingCreator] = useState(false);
+  const [fetchFeedback, setFetchFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+    details?: any;
+  } | null>(null);
+
   useEffect(() => {
     fetch("/api/categories", { credentials: "include" })
       .then(r => r.json())
       .then(r => { if (r.success) setCategories(r.data); });
   }, []);
+
+  const handleFetchFromCreator = async (targetInput?: string) => {
+    const raw = (targetInput || asinInput || form.affiliateLink || "").trim();
+    if (!raw) {
+      setFetchFeedback({
+        type: "error",
+        text: "Please enter an Amazon Product Link or ASIN (e.g. B0FN41SQQ7).",
+      });
+      return;
+    }
+
+    // Extract 10-character ASIN
+    let asin = raw.toUpperCase();
+    const urlMatch = raw.match(/(?:dp|gp\/product|product|asin|d)\/([A-Z0-9]{10})/i);
+    if (urlMatch && urlMatch[1]) {
+      asin = urlMatch[1].toUpperCase();
+    } else {
+      const queryMatch = raw.match(/[?&]asin=([A-Z0-9]{10})/i);
+      if (queryMatch && queryMatch[1]) {
+        asin = queryMatch[1].toUpperCase();
+      }
+    }
+
+    if (!/^[A-Z0-9]{10}$/.test(asin)) {
+      setFetchFeedback({
+        type: "error",
+        text: "Could not detect a valid 10-character Amazon ASIN (e.g. B0FN41SQQ7).",
+      });
+      return;
+    }
+
+    setFetchingCreator(true);
+    setFetchFeedback(null);
+
+    try {
+      const res = await fetch(`/api/amazon?itemIds=${asin}`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error || !data.products || data.products.length === 0) {
+        setFetchFeedback({
+          type: "error",
+          text: data.error || data.message || "No product found on Amazon Creator API for ASIN: " + asin,
+        });
+        return;
+      }
+
+      const p = data.products[0];
+
+      // Auto-match category from existing categories
+      let matchedCategory = form.category;
+      if (!matchedCategory && categories.length > 0) {
+        const found = categories.find(
+          c => c.name.toLowerCase() === (p.category || "").toLowerCase() ||
+               p.title.toLowerCase().includes(c.name.toLowerCase())
+        );
+        if (found) matchedCategory = found.name;
+        else matchedCategory = categories[0].name;
+      }
+
+      setForm(prev => ({
+        ...prev,
+        title: p.title || prev.title,
+        subtitle: p.subtitle || prev.subtitle,
+        description: p.description || prev.description,
+        price: p.price && p.price !== "Check on Amazon" ? p.price : prev.price,
+        originalPrice: p.originalPrice && p.originalPrice !== "Check on Amazon" ? p.originalPrice : (p.price || prev.originalPrice),
+        unitPrice: p.unitPrice || prev.unitPrice,
+        category: matchedCategory || prev.category,
+        image: p.image || prev.image,
+        images: Array.isArray(p.images) && p.images.length > 0 ? p.images : prev.images,
+        rating: p.rating ? String(p.rating) : prev.rating,
+        reviews: p.reviews ? String(p.reviews) : prev.reviews,
+        affiliateLink: p.affiliateLink || prev.affiliateLink,
+        badge: p.badge || prev.badge,
+      }));
+
+      const offerText = p.offerDetails?.dealBadge
+        ? `[${p.offerDetails.dealBadge}] `
+        : p.offerDetails?.savingPercentage
+        ? `(${p.offerDetails.savingPercentage}% off) `
+        : "";
+
+      setFetchFeedback({
+        type: "success",
+        text: `✓ Live Price: ${p.price || "Check on Amazon"} ${offerText}| M.R.P.: ${p.originalPrice || p.price} — details auto-filled!`,
+        details: p,
+      });
+    } catch (err: any) {
+      setFetchFeedback({
+        type: "error",
+        text: `Network error querying Creator API: ${err.message}`,
+      });
+    } finally {
+      setFetchingCreator(false);
+    }
+  };
 
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [field]: e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value }));
@@ -145,6 +253,92 @@ export default function NewProductPage() {
         <h2 style={{ fontSize: "1.4rem", fontWeight: 800, color: "#F8FAFC", fontFamily: "'Montserrat', sans-serif", margin: 0 }}>
           Add New Product
         </h2>
+      </div>
+
+      {/* ⚡ Creator API Auto-Fill / Live Price Fetch Bar */}
+      <div style={{
+        background: "rgba(30, 41, 59, 0.7)",
+        backdropFilter: "blur(12px)",
+        border: "1px solid rgba(249, 115, 22, 0.35)",
+        borderRadius: "16px",
+        padding: "20px 24px",
+        marginBottom: "28px",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+          <span style={{ fontSize: "1.4rem" }}>⚡</span>
+          <div>
+            <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: "#F8FAFC", margin: 0 }}>
+              Auto-Fetch Live Price & Attributes via Amazon Creator API
+            </h3>
+            <p style={{ fontSize: "0.82rem", color: "#94A3B8", margin: "2px 0 0" }}>
+              Paste an Amazon Product URL or enter a 10-character ASIN to automatically fetch live selling price, M.R.P., gallery images, ratings, and specifications.
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            placeholder="e.g. https://www.amazon.in/dp/B0FN41SQQ7 or ASIN B0FN41SQQ7"
+            value={asinInput}
+            onChange={(e) => setAsinInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleFetchFromCreator(asinInput);
+              }
+            }}
+            style={{
+              flex: 1,
+              minWidth: "260px",
+              padding: "12px 16px",
+              borderRadius: "12px",
+              background: "rgba(15, 23, 42, 0.8)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "#F8FAFC",
+              fontSize: "0.88rem",
+              outline: "none",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => handleFetchFromCreator(asinInput)}
+            disabled={fetchingCreator}
+            style={{
+              padding: "12px 24px",
+              borderRadius: "12px",
+              background: "linear-gradient(135deg, #F97316 0%, #EA580C 100%)",
+              border: "none",
+              color: "white",
+              fontSize: "0.88rem",
+              fontWeight: 700,
+              cursor: fetchingCreator ? "wait" : "pointer",
+              boxShadow: "0 4px 14px rgba(249,115,22,0.35)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {fetchingCreator ? "🔄 Fetching Live Price…" : "⚡ Fetch Price & Details"}
+          </button>
+        </div>
+
+        {fetchFeedback && (
+          <div style={{
+            marginTop: "14px",
+            padding: "12px 16px",
+            borderRadius: "10px",
+            fontSize: "0.86rem",
+            fontWeight: 600,
+            background: fetchFeedback.type === "success" ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
+            border: `1px solid ${fetchFeedback.type === "success" ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+            color: fetchFeedback.type === "success" ? "#34D399" : "#FCA5A5",
+          }}>
+            {fetchFeedback.text}
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -253,7 +447,28 @@ export default function NewProductPage() {
 
             {/* Affiliate Link */}
             <div>
-              <label style={labelStyle}>Amazon Affiliate Link *</label>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <label style={{ ...labelStyle, margin: 0 }}>Amazon Affiliate Link *</label>
+                {form.affiliateLink && (
+                  <button
+                    type="button"
+                    onClick={() => handleFetchFromCreator(form.affiliateLink)}
+                    disabled={fetchingCreator}
+                    style={{
+                      background: "rgba(249,115,22,0.18)",
+                      border: "1px solid rgba(249,115,22,0.4)",
+                      color: "#FB923C",
+                      padding: "3px 10px",
+                      borderRadius: "6px",
+                      fontSize: "0.74rem",
+                      fontWeight: 700,
+                      cursor: fetchingCreator ? "wait" : "pointer",
+                    }}
+                  >
+                    {fetchingCreator ? "🔄 Fetching…" : "⚡ Fetch Live Price from Link"}
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 required
