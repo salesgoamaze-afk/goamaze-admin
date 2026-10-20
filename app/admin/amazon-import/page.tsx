@@ -551,7 +551,27 @@ export default function AmazonImportPage() {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <Link
+            href="/admin/recommendations"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              padding: "10px 18px",
+              borderRadius: "12px",
+              background: "linear-gradient(135deg, #8B5CF6 0%, #6366F1 100%)",
+              border: "1px solid rgba(139,92,246,0.35)",
+              color: "#FFFFFF",
+              fontSize: "0.85rem",
+              fontWeight: 700,
+              textDecoration: "none",
+              boxShadow: "0 4px 14px rgba(139,92,246,0.3)",
+              transition: "all 0.2s",
+            }}
+          >
+            🧠 AI Recommendations Hub
+          </Link>
           <Link
             href="/admin/products"
             style={{

@@ -22,6 +22,17 @@ export interface ProductRecord {
   createdAt: string;
   updatedAt: string;
   _id?: string;
+  aiScore?: number;
+  aiScoreBreakdown?: Record<string, number>;
+  aiSummary?: string;
+  pros?: string[];
+  cons?: string[];
+  bestFor?: string;
+  recommendationReason?: string;
+  curationStatus?: "approved" | "pending" | "rejected" | string;
+  confidenceLevel?: "high" | "medium" | "low" | string;
+  dataQualityFlags?: string[];
+  lastAnalyzedAt?: string;
 }
 
 export type ProductInput = Omit<Partial<ProductRecord>, "featured"> & {
@@ -42,9 +53,20 @@ export interface CreateProductInput {
   instagramUrl?: string;
   affiliateLink: string;
   badge?: string;
-  rating?: number;
-  reviews?: number;
+  rating?: number | null;
+  reviews?: number | null;
   featured?: boolean;
+  aiScore?: number | null;
+  aiScoreBreakdown?: Record<string, number>;
+  aiSummary?: string;
+  pros?: string[];
+  cons?: string[];
+  bestFor?: string;
+  recommendationReason?: string;
+  curationStatus?: string;
+  confidenceLevel?: string;
+  dataQualityFlags?: string[];
+  lastAnalyzedAt?: string;
 }
 
 export interface CategoryRecord {
@@ -191,15 +213,50 @@ function formatProduct(r: any): ProductRecord {
     parsedImages = r.image ? [r.image] : [];
   }
 
+  // Parse embedded AI recommendation metadata if present in description
+  let aiData: any = {};
+  if (typeof r.description === "string" && r.description.includes("<!-- AI_DATA:")) {
+    try {
+      const match = r.description.match(/<!-- AI_DATA:\s*([\s\S]*?)\s*-->/);
+      if (match && match[1]) {
+        aiData = JSON.parse(match[1]);
+      }
+    } catch {
+      aiData = {};
+    }
+  }
+
+  // Clean description of internal AI tag for display
+  const displayDescription = typeof r.description === "string"
+    ? r.description.replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim()
+    : (r.description || "");
+
   return {
     ...r,
     _id: String(r.id),
     id: String(r.id),
+    description: displayDescription,
     images: parsedImages,
     instagramUrl: r.instagramUrl || "",
     featured: Boolean(r.featured),
     rating: Number(r.rating ?? 4.5),
     reviews: Number(r.reviews ?? 0),
+
+    // AI Recommendation Structured Fields
+    aiScore: r.aiScore !== undefined ? Number(r.aiScore) : aiData.aiScore,
+    aiScoreBreakdown: r.aiScoreBreakdown || aiData.scoreBreakdown,
+    rank: r.rank !== undefined ? Number(r.rank) : aiData.rank,
+    award: r.award || aiData.award || (r.badge && r.badge.includes("Best") ? r.badge : undefined),
+    aiSummary: r.aiSummary || aiData.aiSummary || "",
+    pros: Array.isArray(r.pros) ? r.pros : (aiData.pros || []),
+    cons: Array.isArray(r.cons) ? r.cons : (aiData.cons || []),
+    bestFor: r.bestFor || aiData.bestFor || "",
+    recommendationReason: r.recommendationReason || aiData.recommendationReason || "",
+    targetAudience: r.targetAudience || aiData.targetAudience || "",
+    curationStatus: r.curationStatus || aiData.curationStatus || "pending",
+    confidenceLevel: r.confidenceLevel || aiData.confidenceLevel || "high",
+    dataQualityFlags: Array.isArray(r.dataQualityFlags) ? r.dataQualityFlags : (aiData.dataQualityFlags || []),
+    lastAnalyzedAt: r.lastAnalyzedAt || aiData.lastAnalyzedAt || "",
   };
 }
 
@@ -325,11 +382,29 @@ export const db = {
       throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
     }
 
-    const newRecord = {
+    // Embed structured AI metadata in description if provided and not yet embedded
+    let finalDescription = data.description || "";
+    if (data.aiScore !== undefined && !finalDescription.includes("<!-- AI_DATA:")) {
+      const aiMeta = {
+        aiScore: data.aiScore,
+        scoreBreakdown: data.aiScoreBreakdown,
+        aiSummary: data.aiSummary,
+        pros: data.pros,
+        cons: data.cons,
+        bestFor: data.bestFor,
+        recommendationReason: data.recommendationReason,
+        confidenceLevel: data.confidenceLevel,
+        curationStatus: data.curationStatus || "approved",
+        lastAnalyzedAt: data.lastAnalyzedAt || now,
+      };
+      finalDescription = `${finalDescription}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
+    }
+
+    const newRecord: any = {
       id,
       title: data.title,
       subtitle: data.subtitle || data.title,
-      description: data.description || "",
+      description: finalDescription,
       price: data.price,
       originalPrice: data.originalPrice || data.price,
       unitPrice: data.unitPrice || "",
@@ -399,11 +474,28 @@ export const db = {
       const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
       const primaryImage = data.image || imagesArray[0] || "";
 
+      let finalDescription = data.description || "";
+      if (data.aiScore !== undefined && !finalDescription.includes("<!-- AI_DATA:")) {
+        const aiMeta = {
+          aiScore: data.aiScore,
+          scoreBreakdown: data.aiScoreBreakdown,
+          aiSummary: data.aiSummary,
+          pros: data.pros,
+          cons: data.cons,
+          bestFor: data.bestFor,
+          recommendationReason: data.recommendationReason,
+          confidenceLevel: data.confidenceLevel,
+          curationStatus: data.curationStatus || "approved",
+          lastAnalyzedAt: data.lastAnalyzedAt || now,
+        };
+        finalDescription = `${finalDescription}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
+      }
+
       return {
         id,
         title: data.title,
         subtitle: data.subtitle || data.title,
-        description: data.description || "",
+        description: finalDescription,
         price: data.price,
         originalPrice: data.originalPrice || data.price,
         unitPrice: data.unitPrice || "",
@@ -470,6 +562,25 @@ export const db = {
     if (data.rating !== undefined) updateData.rating = Number(data.rating);
     if (data.reviews !== undefined) updateData.reviews = Number(data.reviews);
     if (data.featured !== undefined) updateData.featured = Boolean(data.featured);
+
+    // AI metadata update support
+    if (data.aiScore !== undefined || data.bestFor !== undefined || data.aiSummary !== undefined) {
+      const existingProduct = await this.getProductById(idStr);
+      const cleanDesc = (data.description !== undefined ? data.description : existingProduct?.description || "").replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim();
+      const aiMeta = {
+        aiScore: data.aiScore !== undefined ? data.aiScore : existingProduct?.aiScore,
+        scoreBreakdown: data.aiScoreBreakdown || existingProduct?.aiScoreBreakdown,
+        aiSummary: data.aiSummary !== undefined ? data.aiSummary : existingProduct?.aiSummary,
+        pros: data.pros !== undefined ? data.pros : existingProduct?.pros,
+        cons: data.cons !== undefined ? data.cons : existingProduct?.cons,
+        bestFor: data.bestFor !== undefined ? data.bestFor : existingProduct?.bestFor,
+        recommendationReason: data.recommendationReason !== undefined ? data.recommendationReason : existingProduct?.recommendationReason,
+        confidenceLevel: data.confidenceLevel || existingProduct?.confidenceLevel || "high",
+        curationStatus: data.curationStatus || existingProduct?.curationStatus || "approved",
+        lastAnalyzedAt: data.lastAnalyzedAt || now,
+      };
+      updateData.description = `${cleanDesc}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
+    }
 
     const { data: updated, error } = await supabase
       .from("products")
@@ -958,7 +1069,9 @@ export const db = {
         id,
         images,
         image: p.image || images[0] || "",
-      });
+        rating: p.rating ? Number(p.rating) : 4.5,
+        reviews: p.reviews ? Number(p.reviews) : 0,
+      } as any);
       count++;
     }
 
@@ -994,7 +1107,9 @@ export const db = {
         id,
         images,
         image: p.image || images[0] || "",
-      });
+        rating: p.rating ? Number(p.rating) : 4.5,
+        reviews: p.reviews ? Number(p.reviews) : 0,
+      } as any);
     }
 
     return this.getAnalytics();

@@ -12,6 +12,7 @@ interface AdminSidebarProps {
 
 const NAV_ITEMS = [
   { href: "/admin",              label: "Dashboard",      icon: "⚡" },
+  { href: "/admin/recommendations", label: "AI Recommendations", icon: "🧠" },
   { href: "/admin/products",     label: "Products",       icon: "🛍️" },
   { href: "/admin/amazon-import",label: "Amazon Creator", icon: "🛒" },
   { href: "/admin/social-studio",label: "Social Studio",  icon: "🎨" },
