@@ -31,6 +31,7 @@ const SingleProductSchema = z.object({
     return isNaN(n) ? 0 : Math.max(0, n);
   }),
   featured:      z.boolean().optional().default(false),
+  source:        z.string().optional().default("amazon"),
 });
 
 const BatchSchema = z.object({
@@ -65,6 +66,7 @@ export async function GET(req: NextRequest) {
 /**
  * POST /api/products/batch
  * Imports multiple products into the GoAmaze database in one request.
+ * Automatically prevents duplicates and updates existing records.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -91,6 +93,7 @@ export async function POST(req: NextRequest) {
 
     const preparedProducts = parsed.data.products.map((item) => ({
       ...item,
+      source: item.source || "amazon",
       originalPrice: item.originalPrice || item.price,
       subtitle: item.subtitle || `Authentic ${item.title.slice(0, 60)} — top-rated choice`,
       images: Array.isArray(item.images) && item.images.length > 0 ? item.images : [item.image],
@@ -98,12 +101,26 @@ export async function POST(req: NextRequest) {
 
     const result = await db.createProductsBatch(preparedProducts);
 
+    const addedCount = result.added.length;
+    const updatedCount = result.updated.length;
+
+    let msg = `Successfully processed ${result.count} product${result.count === 1 ? "" : "s"}`;
+    if (addedCount > 0 && updatedCount > 0) {
+      msg += ` (${addedCount} newly added, ${updatedCount} updated, 0 duplicates created).`;
+    } else if (addedCount > 0) {
+      msg += ` (${addedCount} newly added, 0 duplicates created).`;
+    } else {
+      msg += ` (${updatedCount} updated with latest data, 0 duplicates created).`;
+    }
+
     return NextResponse.json(
       {
         success: true,
-        message: `Successfully imported ${result.count} product${result.count === 1 ? "" : "s"} into GoAmaze.`,
+        message: msg,
         count: result.count,
-        data: result.added,
+        addedCount,
+        updatedCount,
+        data: [...result.added, ...result.updated],
       },
       { status: 201 }
     );

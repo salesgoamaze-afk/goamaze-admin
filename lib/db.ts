@@ -1,6 +1,13 @@
 import bcrypt from "bcryptjs";
 import productsJsonFallback from "@/data/products.json";
 import { getSupabase } from "./supabase";
+import {
+  ProductSource,
+  extractAsin,
+  normalizeProductUrl,
+  determineProductSource,
+  findDuplicateInList,
+} from "./product-identifier";
 
 export interface ProductRecord {
   id: string;
@@ -22,8 +29,11 @@ export interface ProductRecord {
   createdAt: string;
   updatedAt: string;
   _id?: string;
+  source: ProductSource;
   aiScore?: number;
   aiScoreBreakdown?: Record<string, number>;
+  rank?: number;
+  award?: string;
   aiSummary?: string;
   pros?: string[];
   cons?: string[];
@@ -37,6 +47,7 @@ export interface ProductRecord {
 
 export type ProductInput = Omit<Partial<ProductRecord>, "featured"> & {
   featured?: boolean;
+  source?: ProductSource;
 };
 
 export interface CreateProductInput {
@@ -56,8 +67,11 @@ export interface CreateProductInput {
   rating?: number | null;
   reviews?: number | null;
   featured?: boolean;
+  source?: ProductSource;
   aiScore?: number | null;
   aiScoreBreakdown?: Record<string, number>;
+  rank?: number;
+  award?: string;
   aiSummary?: string;
   pros?: string[];
   cons?: string[];
@@ -241,6 +255,7 @@ function formatProduct(r: any): ProductRecord {
     featured: Boolean(r.featured),
     rating: Number(r.rating ?? 4.5),
     reviews: Number(r.reviews ?? 0),
+    source: r.source || aiData.source || determineProductSource({ affiliateLink: r.affiliateLink }) || "amazon",
 
     // AI Recommendation Structured Fields
     aiScore: r.aiScore !== undefined ? Number(r.aiScore) : aiData.aiScore,
@@ -372,31 +387,85 @@ export const db = {
   },
 
   async createProduct(data: CreateProductInput): Promise<ProductRecord | null> {
-    const id = data.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-    const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
-    const primaryImage = data.image || imagesArray[0] || "";
-
     const supabase = getSupabase();
     if (!supabase) {
       throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
     }
 
-    // Embed structured AI metadata in description if provided and not yet embedded
+    const effectiveSource = determineProductSource(data);
+    const now = new Date().toISOString();
+
+    // ── Deduplication Guard ─────────────────────────────────────────────
+    // Check if product already exists in database (by ASIN, URL, or Title+Category)
+    const existingList = await this.getProducts({ limit: 5000 });
+    const duplicate = findDuplicateInList(
+      {
+        id: data.id,
+        title: data.title,
+        category: data.category,
+        affiliateLink: data.affiliateLink,
+        source: effectiveSource,
+      },
+      existingList
+    );
+
+    if (duplicate) {
+      console.log(`[db.createProduct] Duplicate detected for "${data.title}" (ID: ${duplicate.id}, Source: ${duplicate.source}). Updating existing record instead of inserting.`);
+      return await this.updateProduct(duplicate.id, {
+        title: data.title,
+        subtitle: data.subtitle || duplicate.subtitle,
+        description: data.description || duplicate.description,
+        price: data.price,
+        originalPrice: data.originalPrice || duplicate.originalPrice,
+        unitPrice: data.unitPrice || duplicate.unitPrice,
+        category: data.category || duplicate.category,
+        image: data.image || duplicate.image,
+        images: data.images && data.images.length > 0 ? data.images : duplicate.images,
+        affiliateLink: data.affiliateLink || duplicate.affiliateLink,
+        badge: data.badge || duplicate.badge,
+        rating: data.rating !== undefined && data.rating !== null ? Number(data.rating) : duplicate.rating,
+        reviews: data.reviews !== undefined && data.reviews !== null ? Number(data.reviews) : duplicate.reviews,
+        featured: Boolean(data.featured !== undefined ? data.featured : duplicate.featured),
+        source: effectiveSource,
+        aiScore: data.aiScore !== undefined && data.aiScore !== null ? Number(data.aiScore) : duplicate.aiScore,
+        aiScoreBreakdown: data.aiScoreBreakdown || duplicate.aiScoreBreakdown,
+        rank: data.rank !== undefined ? Number(data.rank) : duplicate.rank,
+        award: data.award || duplicate.award,
+        aiSummary: data.aiSummary || duplicate.aiSummary,
+        pros: data.pros && data.pros.length > 0 ? data.pros : duplicate.pros,
+        cons: data.cons && data.cons.length > 0 ? data.cons : duplicate.cons,
+        bestFor: data.bestFor || duplicate.bestFor,
+        recommendationReason: data.recommendationReason || duplicate.recommendationReason,
+        curationStatus: data.curationStatus || duplicate.curationStatus,
+        confidenceLevel: data.confidenceLevel || duplicate.confidenceLevel,
+        dataQualityFlags: data.dataQualityFlags || duplicate.dataQualityFlags,
+        lastAnalyzedAt: data.lastAnalyzedAt || duplicate.lastAnalyzedAt,
+      });
+    }
+
+    const id = data.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
+    const primaryImage = data.image || imagesArray[0] || "";
+
+    // Embed structured metadata (including source) in description for resilient persistence
     let finalDescription = data.description || "";
-    if (data.aiScore !== undefined && !finalDescription.includes("<!-- AI_DATA:")) {
-      const aiMeta = {
-        aiScore: data.aiScore,
-        scoreBreakdown: data.aiScoreBreakdown,
-        aiSummary: data.aiSummary,
-        pros: data.pros,
-        cons: data.cons,
-        bestFor: data.bestFor,
-        recommendationReason: data.recommendationReason,
-        confidenceLevel: data.confidenceLevel,
-        curationStatus: data.curationStatus || "approved",
-        lastAnalyzedAt: data.lastAnalyzedAt || now,
-      };
+    const aiMeta = {
+      source: effectiveSource,
+      aiScore: data.aiScore,
+      scoreBreakdown: data.aiScoreBreakdown,
+      rank: data.rank,
+      award: data.award,
+      aiSummary: data.aiSummary,
+      pros: data.pros,
+      cons: data.cons,
+      bestFor: data.bestFor,
+      recommendationReason: data.recommendationReason,
+      confidenceLevel: data.confidenceLevel,
+      curationStatus: data.curationStatus || "approved",
+      dataQualityFlags: data.dataQualityFlags || [],
+      lastAnalyzedAt: data.lastAnalyzedAt || now,
+    };
+    if (!finalDescription.includes("<!-- AI_DATA:")) {
       finalDescription = `${finalDescription}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
     }
 
@@ -414,122 +483,133 @@ export const db = {
       instagramUrl: data.instagramUrl || "",
       affiliateLink: data.affiliateLink,
       badge: data.badge || "New",
-      rating: data.rating !== undefined ? Number(data.rating) : 4.5,
-      reviews: data.reviews !== undefined ? Number(data.reviews) : 0,
+      rating: data.rating !== undefined && data.rating !== null ? Number(data.rating) : 4.5,
+      reviews: data.reviews !== undefined && data.reviews !== null ? Number(data.reviews) : 0,
       featured: Boolean(data.featured),
       createdAt: now,
       updatedAt: now,
     };
 
-    const { data: created, error } = await supabase
+    // Attempt insert with native 'source' column; fallback gracefully if column not yet added to SQL
+    let created: any = null;
+    const withSource = { ...newRecord, source: effectiveSource };
+    const { data: resData, error: insertError } = await supabase
       .from("products")
-      .insert(newRecord)
+      .insert(withSource)
       .select()
       .single();
 
-    if (error) {
-      console.error("[Supabase createProduct error]", error);
-      throw new Error(error.message);
+    if (insertError && insertError.message.includes("source")) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from("products")
+        .insert(newRecord)
+        .select()
+        .single();
+      if (fallbackError) {
+        console.error("[Supabase createProduct fallback error]", fallbackError);
+        throw new Error(fallbackError.message);
+      }
+      created = fallbackData;
+    } else if (insertError) {
+      console.error("[Supabase createProduct error]", insertError);
+      throw new Error(insertError.message);
+    } else {
+      created = resData;
     }
+
     return created ? formatProduct(created) : null;
   },
 
   async checkExistingAsins(asins: string[]): Promise<string[]> {
     if (!asins || asins.length === 0) return [];
-    const supabase = getSupabase();
-    if (supabase) {
-      const { data, error } = await supabase.from("products").select("id, affiliateLink");
-      if (error || !data) return [];
-      const found: string[] = [];
-      for (const asin of asins) {
-        const asinLower = asin.toLowerCase();
-        const exists = data.some(
-          (p: any) =>
-            p.id?.toLowerCase().includes(asinLower) ||
-            p.affiliateLink?.toLowerCase().includes(asinLower)
-        );
-        if (exists) found.push(asin);
-      }
-      return found;
+    const allProducts = await this.getProducts({ limit: 5000 });
+    const existingAsinSet = new Set<string>();
+
+    for (const p of allProducts) {
+      const asin = extractAsin(p.affiliateLink) || extractAsin(p.id);
+      if (asin) existingAsinSet.add(asin.toUpperCase());
     }
 
-    const local = (productsJsonFallback as any[]) || [];
-    return asins.filter((asin) => {
-      const asinLower = asin.toLowerCase();
-      return local.some(
-        (p: any) =>
-          String(p.id).toLowerCase().includes(asinLower) ||
-          String(p.affiliateLink || "").toLowerCase().includes(asinLower)
-      );
-    });
+    const found: string[] = [];
+    for (const candidate of asins) {
+      const clean = extractAsin(candidate) || candidate.trim().toUpperCase();
+      if (existingAsinSet.has(clean)) {
+        found.push(clean);
+      }
+    }
+    return found;
   },
 
-  async createProductsBatch(records: CreateProductInput[]): Promise<{ added: ProductRecord[]; count: number }> {
-    if (!records || records.length === 0) return { added: [], count: 0 };
+  async createProductsBatch(records: CreateProductInput[]): Promise<{ added: ProductRecord[]; updated: ProductRecord[]; count: number }> {
+    if (!records || records.length === 0) return { added: [], updated: [], count: 0 };
     const supabase = getSupabase();
-    const now = new Date().toISOString();
-
-    const preparedRecords = records.map((data, index) => {
-      const id = data.id || `prod_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 6)}`;
-      const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
-      const primaryImage = data.image || imagesArray[0] || "";
-
-      let finalDescription = data.description || "";
-      if (data.aiScore !== undefined && !finalDescription.includes("<!-- AI_DATA:")) {
-        const aiMeta = {
-          aiScore: data.aiScore,
-          scoreBreakdown: data.aiScoreBreakdown,
-          aiSummary: data.aiSummary,
-          pros: data.pros,
-          cons: data.cons,
-          bestFor: data.bestFor,
-          recommendationReason: data.recommendationReason,
-          confidenceLevel: data.confidenceLevel,
-          curationStatus: data.curationStatus || "approved",
-          lastAnalyzedAt: data.lastAnalyzedAt || now,
-        };
-        finalDescription = `${finalDescription}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
-      }
-
-      return {
-        id,
-        title: data.title,
-        subtitle: data.subtitle || data.title,
-        description: finalDescription,
-        price: data.price,
-        originalPrice: data.originalPrice || data.price,
-        unitPrice: data.unitPrice || "",
-        category: data.category,
-        image: primaryImage,
-        images: imagesArray,
-        instagramUrl: data.instagramUrl || "",
-        affiliateLink: data.affiliateLink,
-        badge: data.badge || "New",
-        rating: data.rating !== undefined ? Number(data.rating) : 4.5,
-        reviews: data.reviews !== undefined ? Number(data.reviews) : 0,
-        featured: Boolean(data.featured),
-        createdAt: now,
-        updatedAt: now,
-      };
-    });
-
-    if (supabase) {
-      const { data: created, error } = await supabase
-        .from("products")
-        .insert(preparedRecords)
-        .select();
-
-      if (error) {
-        console.error("[Supabase createProductsBatch error]", error);
-        throw new Error(error.message);
-      }
-
-      const added = (created || []).map(formatProduct);
-      return { added, count: added.length };
+    if (!supabase) {
+      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
     }
 
-    const added = preparedRecords.map(formatProduct);
-    return { added, count: added.length };
+    // 1. Deduplicate within the incoming batch itself first
+    const dedupedIncoming: CreateProductInput[] = [];
+    for (const rec of records) {
+      const existingInBatch = findDuplicateInList(rec, dedupedIncoming as any);
+      if (!existingInBatch) {
+        dedupedIncoming.push(rec);
+      } else {
+        const idx = dedupedIncoming.indexOf(existingInBatch as any);
+        if (idx !== -1) {
+          dedupedIncoming[idx] = { ...existingInBatch, ...rec };
+        }
+      }
+    }
+
+    // 2. Fetch all existing products from database to prevent duplicate inserts
+    const existingList = await this.getProducts({ limit: 5000 });
+    const added: ProductRecord[] = [];
+    const updated: ProductRecord[] = [];
+
+    for (const item of dedupedIncoming) {
+      const duplicate = findDuplicateInList(item, existingList);
+      if (duplicate) {
+        const up = await this.updateProduct(duplicate.id, {
+          title: item.title,
+          subtitle: item.subtitle || duplicate.subtitle,
+          description: item.description || duplicate.description,
+          price: item.price,
+          originalPrice: item.originalPrice || duplicate.originalPrice,
+          unitPrice: item.unitPrice || duplicate.unitPrice,
+          category: item.category || duplicate.category,
+          image: item.image || duplicate.image,
+          images: item.images && item.images.length > 0 ? item.images : duplicate.images,
+          affiliateLink: item.affiliateLink || duplicate.affiliateLink,
+          badge: item.badge || duplicate.badge,
+          rating: item.rating !== undefined && item.rating !== null ? Number(item.rating) : duplicate.rating,
+          reviews: item.reviews !== undefined && item.reviews !== null ? Number(item.reviews) : duplicate.reviews,
+          featured: Boolean(item.featured !== undefined ? item.featured : duplicate.featured),
+          source: determineProductSource(item),
+          aiScore: item.aiScore !== undefined && item.aiScore !== null ? Number(item.aiScore) : duplicate.aiScore,
+          aiScoreBreakdown: item.aiScoreBreakdown || duplicate.aiScoreBreakdown,
+          rank: item.rank !== undefined ? Number(item.rank) : duplicate.rank,
+          award: item.award || duplicate.award,
+          aiSummary: item.aiSummary || duplicate.aiSummary,
+          pros: item.pros && item.pros.length > 0 ? item.pros : duplicate.pros,
+          cons: item.cons && item.cons.length > 0 ? item.cons : duplicate.cons,
+          bestFor: item.bestFor || duplicate.bestFor,
+          recommendationReason: item.recommendationReason || duplicate.recommendationReason,
+          curationStatus: item.curationStatus || duplicate.curationStatus,
+          confidenceLevel: item.confidenceLevel || duplicate.confidenceLevel,
+          dataQualityFlags: item.dataQualityFlags || duplicate.dataQualityFlags,
+          lastAnalyzedAt: item.lastAnalyzedAt || duplicate.lastAnalyzedAt,
+        });
+        if (up) updated.push(up);
+      } else {
+        const cr = await this.createProduct(item);
+        if (cr) {
+          added.push(cr);
+          existingList.push(cr); // immediately register in local cache for subsequent items
+        }
+      }
+    }
+
+    return { added, updated, count: added.length + updated.length };
   },
 
   async updateProduct(id: string | number, data: ProductInput): Promise<ProductRecord | null> {
@@ -559,37 +639,55 @@ export const db = {
     if (data.instagramUrl !== undefined) updateData.instagramUrl = data.instagramUrl;
     if (data.affiliateLink !== undefined) updateData.affiliateLink = data.affiliateLink;
     if (data.badge !== undefined) updateData.badge = data.badge;
-    if (data.rating !== undefined) updateData.rating = Number(data.rating);
-    if (data.reviews !== undefined) updateData.reviews = Number(data.reviews);
+    if (data.rating !== undefined && data.rating !== null) updateData.rating = Number(data.rating);
+    if (data.reviews !== undefined && data.reviews !== null) updateData.reviews = Number(data.reviews);
     if (data.featured !== undefined) updateData.featured = Boolean(data.featured);
+    if (data.source !== undefined) updateData.source = data.source;
 
-    // AI metadata update support
-    if (data.aiScore !== undefined || data.bestFor !== undefined || data.aiSummary !== undefined) {
-      const existingProduct = await this.getProductById(idStr);
-      const cleanDesc = (data.description !== undefined ? data.description : existingProduct?.description || "").replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim();
-      const aiMeta = {
-        aiScore: data.aiScore !== undefined ? data.aiScore : existingProduct?.aiScore,
-        scoreBreakdown: data.aiScoreBreakdown || existingProduct?.aiScoreBreakdown,
-        aiSummary: data.aiSummary !== undefined ? data.aiSummary : existingProduct?.aiSummary,
-        pros: data.pros !== undefined ? data.pros : existingProduct?.pros,
-        cons: data.cons !== undefined ? data.cons : existingProduct?.cons,
-        bestFor: data.bestFor !== undefined ? data.bestFor : existingProduct?.bestFor,
-        recommendationReason: data.recommendationReason !== undefined ? data.recommendationReason : existingProduct?.recommendationReason,
-        confidenceLevel: data.confidenceLevel || existingProduct?.confidenceLevel || "high",
-        curationStatus: data.curationStatus || existingProduct?.curationStatus || "approved",
-        lastAnalyzedAt: data.lastAnalyzedAt || now,
-      };
-      updateData.description = `${cleanDesc}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
-    }
+    // AI & Source metadata update support in description
+    const existingProduct = await this.getProductById(idStr);
+    const effectiveSource = data.source || existingProduct?.source || "amazon";
+    const cleanDesc = (data.description !== undefined ? data.description : existingProduct?.description || "").replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim();
 
-    const { data: updated, error } = await supabase
+    const aiMeta = {
+      source: effectiveSource,
+      aiScore: data.aiScore !== undefined ? data.aiScore : existingProduct?.aiScore,
+      scoreBreakdown: data.aiScoreBreakdown || existingProduct?.aiScoreBreakdown,
+      rank: data.rank !== undefined ? data.rank : existingProduct?.rank,
+      award: data.award !== undefined ? data.award : existingProduct?.award,
+      aiSummary: data.aiSummary !== undefined ? data.aiSummary : existingProduct?.aiSummary,
+      pros: data.pros !== undefined ? data.pros : existingProduct?.pros,
+      cons: data.cons !== undefined ? data.cons : existingProduct?.cons,
+      bestFor: data.bestFor !== undefined ? data.bestFor : existingProduct?.bestFor,
+      recommendationReason: data.recommendationReason !== undefined ? data.recommendationReason : existingProduct?.recommendationReason,
+      confidenceLevel: data.confidenceLevel || existingProduct?.confidenceLevel || "high",
+      curationStatus: data.curationStatus || existingProduct?.curationStatus || "approved",
+      dataQualityFlags: data.dataQualityFlags || existingProduct?.dataQualityFlags || [],
+      lastAnalyzedAt: data.lastAnalyzedAt || now,
+    };
+    updateData.description = `${cleanDesc}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
+
+    let { data: updated, error } = await supabase
       .from("products")
       .update(updateData)
       .eq("id", idStr)
       .select()
       .maybeSingle();
 
-    if (error) {
+    if (error && error.message.includes("source")) {
+      delete updateData.source;
+      const res = await supabase
+        .from("products")
+        .update(updateData)
+        .eq("id", idStr)
+        .select()
+        .maybeSingle();
+      if (res.error) {
+        console.error("[Supabase updateProduct fallback error]", res.error);
+        throw new Error(res.error.message);
+      }
+      updated = res.data;
+    } else if (error) {
       console.error("[Supabase updateProduct error]", error);
       throw new Error(error.message);
     }

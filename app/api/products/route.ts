@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const ProductSchema = z.object({
+  id:            z.string().optional(),
   title:         z.string().min(1).max(600),
   subtitle:      z.string().optional().default("Top-rated essentials recommended on GoAmaze"),
   description:   z.string().optional().default(""),
@@ -30,6 +31,7 @@ const ProductSchema = z.object({
     return isNaN(n) ? 0 : Math.max(0, n);
   }),
   featured:      z.boolean().optional().default(false),
+  source:        z.string().optional().default("amazon"),
 });
 
 /** GET /api/products  — public */
@@ -42,9 +44,8 @@ export async function GET(req: NextRequest) {
     const limit    = parseInt(searchParams.get("limit") || "100");
 
     const products = await db.getProducts({ category, search, featured, limit });
-
-    return NextResponse.json({ success: true, data: products });
-  } catch (err) {
+    return NextResponse.json({ success: true, count: products.length, data: products });
+  } catch (err: any) {
     console.error("[GET /api/products]", err);
     return NextResponse.json(
       { success: false, message: "Failed to fetch products" },
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** POST /api/products — admin only */
+/** POST /api/products — admin only (auto deduplicates / updates existing) */
 export async function POST(req: NextRequest) {
   try {
     // Auth check
@@ -78,6 +79,7 @@ export async function POST(req: NextRequest) {
 
     const dataToCreate = {
       ...parsed.data,
+      source: parsed.data.source || "amazon",
       originalPrice: parsed.data.originalPrice || parsed.data.price,
       subtitle: parsed.data.subtitle || `Authentic ${parsed.data.title.slice(0, 60)} — top-rated choice`,
     };
@@ -92,4 +94,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

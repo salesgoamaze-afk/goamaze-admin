@@ -334,6 +334,7 @@ export default function AmazonImportPage() {
         rating: effective.rating,
         reviews: effective.reviews,
         featured: Boolean(effective.featured),
+        source: "amazon",
         instagramUrl: effective.instagramUrl?.trim() || "",
       };
 
@@ -388,6 +389,7 @@ export default function AmazonImportPage() {
         rating: item.rating,
         reviews: item.reviews,
         featured: Boolean(item.featured),
+        source: "amazon",
         instagramUrl: item.instagramUrl?.trim() || "",
       }));
 

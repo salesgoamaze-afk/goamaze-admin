@@ -131,6 +131,7 @@ export const recommendationsStore = {
       rating: product.rating,
       reviews: product.reviews,
       featured: product.award === "Best Overall",
+      source: "amazon",
       // Include direct AI fields (used if database table has native columns)
       aiScore: product.overallScore,
       aiScoreBreakdown: product.scoreBreakdown,
