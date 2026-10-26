@@ -361,6 +361,11 @@ export default function AIRecommendationsPage() {
     return list;
   }, [analysisResult, searchFilter, awardFilter, statusFilter]);
 
+  const publishedCount = useMemo(() => {
+    if (!analysisResult) return 0;
+    return analysisResult.rankedProducts.filter((p) => p.curationStatus === "approved").length;
+  }, [analysisResult]);
+
   return (
     <AdminLayout title="AI Product Recommendations">
       {/* Notice Feedback Banner */}
@@ -1052,7 +1057,7 @@ export default function AIRecommendationsPage() {
                   color: "#FFFFFF",
                 }}
               >
-                ✓ Published Only
+                ✓ Published Only ({publishedCount})
               </button>
             </div>
           </div>

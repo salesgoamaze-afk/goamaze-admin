@@ -14,8 +14,8 @@ import { analyzeProductsHeuristic } from "./heuristic-engine";
 
 export class GroqProvider implements AIProductAnalyzerProvider {
   readonly id = "groq";
-  readonly name = "Groq Cloud (Llama 3.3 70B Versatile Free Tier)";
-  readonly modelName = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  readonly name = "Groq Cloud (High Speed OSS Inference Free Tier)";
+  readonly modelName = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
   readonly isFreeTier = true;
 
   private getApiKey(): string | null {
@@ -105,35 +105,58 @@ Return a JSON object conforming strictly to this format:
 }
 Return only valid JSON.`;
 
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.modelName,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: JSON.stringify(productPayload) },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-        }),
-      });
+    const candidateModels = Array.from(new Set([this.modelName, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]));
+    let successfulModel = this.modelName;
+    let content: string | null = null;
+    let lastError: string | null = null;
 
-      if (!res.ok) {
-        console.warn(`[GroqProvider] Error ${res.status}. Falling back to Heuristic Engine.`);
+    try {
+      for (const m of candidateModels) {
+        try {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            signal: AbortSignal.timeout(4500), // 4.5s strict timeout
+            body: JSON.stringify({
+              model: m,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: JSON.stringify(productPayload) },
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.2,
+            }),
+          });
+
+          if (!res.ok) {
+            const errorText = await res.text();
+            lastError = `Status ${res.status}: ${errorText}`;
+            console.warn(`[GroqProvider] Model ${m} returned ${res.status} (${errorText}). Trying next available candidate.`);
+            continue;
+          }
+
+          const json = await res.json();
+          content = json.choices?.[0]?.message?.content;
+          if (content) {
+            successfulModel = m;
+            break;
+          }
+        } catch (innerErr: any) {
+          lastError = innerErr.message;
+        }
+      }
+
+      if (!content) {
+        console.warn(`[GroqProvider] All Groq candidate models failed (${lastError}). Falling back to Heuristic Engine.`);
         const fallback = analyzeProductsHeuristic(category, products, weights);
         return {
           ...fallback,
-          providerUsed: `Groq (${this.modelName} error ${res.status} -> Fallback Heuristic)`,
+          providerUsed: `Groq (${successfulModel} failed -> Fallback Heuristic)`,
         };
       }
-
-      const json = await res.json();
-      const content = json.choices?.[0]?.message?.content;
       const parsed = JSON.parse(content);
       const aiProducts: any[] = Array.isArray(parsed.products) ? parsed.products : [];
 
@@ -216,8 +239,8 @@ Return only valid JSON.`;
         bestValue: mergedList.find((p) => p.award === "Best Value for Money"),
         bestBudget: mergedList.find((p) => p.award === "Best Budget Pick"),
         rankedProducts: mergedList,
-        providerUsed: `Groq (${this.modelName})`,
-        modelUsed: this.modelName,
+        providerUsed: `Groq (${successfulModel})`,
+        modelUsed: successfulModel,
         executionTimeMs: Date.now() - startTime,
         timestamp: now,
         weightsUsed: weights,

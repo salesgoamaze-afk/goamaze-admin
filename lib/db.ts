@@ -7,7 +7,123 @@ import {
   normalizeProductUrl,
   determineProductSource,
   findDuplicateInList,
+  computeProductDataFingerprint,
+  generateCanonicalProductId,
 } from "./product-identifier";
+import {
+  PRIMARY_THEMES,
+  ADMIN_THEMES,
+  CANONICAL_CATEGORIES,
+  SEASONAL_COLLECTIONS,
+  getThemeBySlug as resolveThemeBySlug,
+  getCategoryBySlug as resolveCategoryBySlug,
+  mapLegacyCategoryToTaxonomy,
+} from "./taxonomy";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPE DEFINITIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AnalysisStatus =
+  | "DISCOVERED"
+  | "PENDING_ANALYSIS"
+  | "ANALYZING"
+  | "ANALYZED"
+  | "NEEDS_REVIEW"
+  | "FAILED";
+
+export type AssignmentSource = "ai" | "manual" | "api";
+
+export type ReviewStatus = "approved" | "pending" | "rejected";
+
+export interface ProductCategoryMapping {
+  id: string;
+  productId: string;
+  categoryId: string;
+  categorySlug?: string;
+  categoryName?: string;
+  source: AssignmentSource;
+  confidenceScore: number;
+  reviewStatus: ReviewStatus;
+  createdAt: string;
+}
+
+export interface ProductThemeMapping {
+  id: string;
+  productId: string;
+  themeId: string;
+  themeSlug?: string;
+  themeName?: string;
+  source: AssignmentSource;
+  confidenceScore: number;
+  reviewStatus: ReviewStatus;
+  createdAt: string;
+}
+
+export interface AIProductAnalysisRecord {
+  id: string;
+  productId: string;
+  provider: string;
+  model: string;
+  promptVersion: string;
+  shortSummary: string;
+  keyFeatures: string[];
+  pros: string[];
+  cons: string[];
+  bestFor: string;
+  comparisonAttributes: Record<string, any>;
+  recommendationExplanation: string;
+  status: AnalysisStatus;
+  dataFingerprint: string;
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ThemeRecord {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  icon: string;
+  image: string;
+  displayOrder: number;
+  isActive: boolean;
+  type?: "permanent" | "seasonal" | "miscellaneous";
+  productTypes?: string[];
+  defaultKeywords?: string[];
+  createdAt: string;
+  updatedAt: string;
+  _id?: string;
+}
+
+export interface CategoryRecord {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string;
+  description?: string;
+  displayOrder?: number;
+  isActive?: boolean;
+  subcategories?: string[];
+  amazonSearchIndex?: string;
+  createdAt: string;
+  updatedAt?: string;
+  _id?: string;
+}
+
+export interface CollectionRecord {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  banner: string;
+  startDate?: string;
+  endDate?: string;
+  isActive: boolean;
+  createdAt: string;
+  _id?: string;
+}
 
 export interface ProductRecord {
   id: string;
@@ -17,7 +133,12 @@ export interface ProductRecord {
   price: string;
   originalPrice: string;
   unitPrice?: string;
-  category: string;
+  category: string; // Legacy / primary category for 100% backward compatibility
+  categories: string[]; // Many-to-many category slugs
+  themes: string[]; // Many-to-many lifestyle theme slugs
+  collections?: string[]; // Seasonal collection slugs
+  categoryMappings?: ProductCategoryMapping[];
+  themeMappings?: ProductThemeMapping[];
   image: string;
   images?: string[];
   instagramUrl?: string;
@@ -30,6 +151,8 @@ export interface ProductRecord {
   updatedAt: string;
   _id?: string;
   source: ProductSource;
+
+  // AI Recommendation attributes
   aiScore?: number;
   aiScoreBreakdown?: Record<string, number>;
   rank?: number;
@@ -43,11 +166,19 @@ export interface ProductRecord {
   confidenceLevel?: "high" | "medium" | "low" | string;
   dataQualityFlags?: string[];
   lastAnalyzedAt?: string;
+
+  // AI Pipeline lifecycle
+  analysisStatus: AnalysisStatus;
+  dataFingerprint?: string;
+  aiAnalysis?: Partial<AIProductAnalysisRecord>;
 }
 
 export type ProductInput = Omit<Partial<ProductRecord>, "featured"> & {
   featured?: boolean;
   source?: ProductSource;
+  categories?: string[];
+  themes?: string[];
+  analysisStatus?: AnalysisStatus;
 };
 
 export interface CreateProductInput {
@@ -58,7 +189,10 @@ export interface CreateProductInput {
   price: string;
   originalPrice?: string;
   unitPrice?: string;
-  category: string;
+  category?: string;
+  categories?: string[];
+  themes?: string[];
+  collections?: string[];
   image: string;
   images?: string[];
   instagramUrl?: string;
@@ -81,15 +215,8 @@ export interface CreateProductInput {
   confidenceLevel?: string;
   dataQualityFlags?: string[];
   lastAnalyzedAt?: string;
-}
-
-export interface CategoryRecord {
-  id: string;
-  name: string;
-  icon: string;
-  slug: string;
-  createdAt: string;
-  _id?: string;
+  analysisStatus?: AnalysisStatus;
+  dataFingerprint?: string;
 }
 
 export interface AdminUserRecord {
@@ -177,41 +304,10 @@ export interface CreateBlogInput {
   published?: boolean;
 }
 
-const DEFAULT_CATEGORY_ICONS: Record<string, string> = {
-  "Festival Special - Diwali": "🪔",
-  "Smart Kitchen": "🍳",
-  "Aesthetic Living": "🛋️",
-  "Desk Setup": "🖥️",
-  "Cozy Wellness": "🕯️",
-  "Coffee Corner": "☕",
-  "Green Living": "🌿",
-  "Gaming Zone": "🎮",
-  "Study Space": "📚",
-  "Miscellaneous": "✨",
-  // Legacy / fallback categories
-  "Kitchen Appliances": "🍳",
-  "Home Decoration": "🛋️",
-  "Lifestyle Products": "✨",
-  "Study & Workspace": "🖥️",
-  "Gym": "🏋️",
-  "Food Items": "🍯",
-  "Apparel": "👕",
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMATTING & EMBEDDED METADATA HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_CATEGORIES: CategoryRecord[] = [
-  { id: "cat_festival_diwali", name: "Festival Special - Diwali", icon: "🪔", slug: "festival-special-diwali", createdAt: new Date().toISOString() },
-  { id: "cat_smart_kitchen", name: "Smart Kitchen", icon: "🍳", slug: "smart-kitchen", createdAt: new Date().toISOString() },
-  { id: "cat_aesthetic_living", name: "Aesthetic Living", icon: "🛋️", slug: "aesthetic-living", createdAt: new Date().toISOString() },
-  { id: "cat_desk_setup", name: "Desk Setup", icon: "🖥️", slug: "desk-setup", createdAt: new Date().toISOString() },
-  { id: "cat_cozy_wellness", name: "Cozy Wellness", icon: "🕯️", slug: "cozy-wellness", createdAt: new Date().toISOString() },
-  { id: "cat_coffee_corner", name: "Coffee Corner", icon: "☕", slug: "coffee-corner", createdAt: new Date().toISOString() },
-  { id: "cat_green_living", name: "Green Living", icon: "🌿", slug: "green-living", createdAt: new Date().toISOString() },
-  { id: "cat_gaming_zone", name: "Gaming Zone", icon: "🎮", slug: "gaming-zone", createdAt: new Date().toISOString() },
-  { id: "cat_study_space", name: "Study Space", icon: "📚", slug: "study-space", createdAt: new Date().toISOString() },
-  { id: "cat_miscellaneous", name: "Miscellaneous", icon: "✨", slug: "miscellaneous", createdAt: new Date().toISOString() },
-];
-
-// FORMATTING HELPERS
 function formatProduct(r: any): ProductRecord {
   let parsedImages: string[] = [];
   try {
@@ -227,7 +323,7 @@ function formatProduct(r: any): ProductRecord {
     parsedImages = r.image ? [r.image] : [];
   }
 
-  // Parse embedded AI recommendation metadata if present in description
+  // Parse embedded AI recommendation & multi-tax metadata if present in description
   let aiData: any = {};
   if (typeof r.description === "string" && r.description.includes("<!-- AI_DATA:")) {
     try {
@@ -245,11 +341,63 @@ function formatProduct(r: any): ProductRecord {
     ? r.description.replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim()
     : (r.description || "");
 
+  // Determine multi-category assignments
+  let categories: string[] = [];
+  if (Array.isArray(r.categories) && r.categories.length > 0) {
+    categories = r.categories;
+  } else if (Array.isArray(aiData.categories) && aiData.categories.length > 0) {
+    categories = aiData.categories;
+  } else {
+    const legacy = mapLegacyCategoryToTaxonomy(r.category, r.title);
+    categories = legacy.categories;
+  }
+
+  // Determine multi-theme assignments
+  let themes: string[] = [];
+  if (Array.isArray(r.themes) && r.themes.length > 0) {
+    themes = r.themes;
+  } else if (Array.isArray(aiData.themes) && aiData.themes.length > 0) {
+    themes = aiData.themes;
+  } else {
+    const legacy = mapLegacyCategoryToTaxonomy(r.category, r.title);
+    themes = legacy.themes;
+  }
+
+  // Determine collections
+  let collections: string[] = [];
+  if (Array.isArray(r.collections)) {
+    collections = r.collections;
+  } else if (Array.isArray(aiData.collections)) {
+    collections = aiData.collections;
+  } else {
+    const legacy = mapLegacyCategoryToTaxonomy(r.category, r.title);
+    if (legacy.collections) collections = legacy.collections;
+  }
+
+  const analysisStatus: AnalysisStatus =
+    r.analysisStatus ||
+    aiData.analysisStatus ||
+    (aiData.aiSummary || r.aiSummary ? "ANALYZED" : "PENDING_ANALYSIS");
+
+  const dataFingerprint =
+    r.dataFingerprint ||
+    aiData.dataFingerprint ||
+    computeProductDataFingerprint({
+      title: r.title,
+      features: aiData.features || [],
+      description: displayDescription,
+      brand: aiData.brand,
+    });
+
   return {
     ...r,
     _id: String(r.id),
     id: String(r.id),
     description: displayDescription,
+    category: r.category || categories[0] || "home-kitchen",
+    categories,
+    themes,
+    collections,
     images: parsedImages,
     instagramUrl: r.instagramUrl || "",
     featured: Boolean(r.featured),
@@ -258,20 +406,25 @@ function formatProduct(r: any): ProductRecord {
     source: r.source || aiData.source || determineProductSource({ affiliateLink: r.affiliateLink }) || "amazon",
 
     // AI Recommendation Structured Fields
-    aiScore: r.aiScore !== undefined ? Number(r.aiScore) : aiData.aiScore,
+    aiScore: r.aiScore !== undefined && r.aiScore !== null ? Number(r.aiScore) : aiData.aiScore,
     aiScoreBreakdown: r.aiScoreBreakdown || aiData.scoreBreakdown,
-    rank: r.rank !== undefined ? Number(r.rank) : aiData.rank,
+    rank: r.rank !== undefined && r.rank !== null ? Number(r.rank) : aiData.rank,
     award: r.award || aiData.award || (r.badge && r.badge.includes("Best") ? r.badge : undefined),
     aiSummary: r.aiSummary || aiData.aiSummary || "",
-    pros: Array.isArray(r.pros) ? r.pros : (aiData.pros || []),
-    cons: Array.isArray(r.cons) ? r.cons : (aiData.cons || []),
+    pros: Array.isArray(r.pros) && r.pros.length > 0 ? r.pros : (aiData.pros || []),
+    cons: Array.isArray(r.cons) && r.cons.length > 0 ? r.cons : (aiData.cons || []),
     bestFor: r.bestFor || aiData.bestFor || "",
     recommendationReason: r.recommendationReason || aiData.recommendationReason || "",
-    targetAudience: r.targetAudience || aiData.targetAudience || "",
-    curationStatus: r.curationStatus || aiData.curationStatus || "pending",
+    curationStatus: r.curationStatus || aiData.curationStatus || "approved",
     confidenceLevel: r.confidenceLevel || aiData.confidenceLevel || "high",
     dataQualityFlags: Array.isArray(r.dataQualityFlags) ? r.dataQualityFlags : (aiData.dataQualityFlags || []),
     lastAnalyzedAt: r.lastAnalyzedAt || aiData.lastAnalyzedAt || "",
+
+    // Lifecycle
+    analysisStatus,
+    dataFingerprint,
+    categoryMappings: r.categoryMappings || [],
+    themeMappings: r.themeMappings || [],
   };
 }
 
@@ -308,41 +461,326 @@ function formatBlog(r: any): BlogRecord {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REPOSITORY METHODS (Supabase Database Layer)
+// REPOSITORY METHODS (Supabase Database Layer with Resilient Fallbacks)
 // ─────────────────────────────────────────────────────────────────────────────
 
+export interface ProductFilters {
+  category?: string;
+  theme?: string;
+  collection?: string;
+  search?: string;
+  featured?: boolean;
+  status?: AnalysisStatus | string;
+  reviewStatus?: ReviewStatus | string;
+  limit?: number;
+  page?: number;
+  sort?: "featured" | "rating" | "price-asc" | "price-desc" | "newest" | "aiScore";
+}
+
 export const db = {
-  // PRODUCTS
-  async getProducts(filters?: { category?: string; search?: string; featured?: boolean; limit?: number }): Promise<ProductRecord[]> {
+  // ── THEMES ─────────────────────────────────────────────────────────────────
+  async getThemes(): Promise<ThemeRecord[]> {
+    const supabase = getSupabase();
+    const adminThemeMap = new Map<string, ThemeRecord>();
+
+    // 1. Preload all 5 Admin Themes (3 permanent lifestyle themes + seasonal diwali + misc)
+    ADMIN_THEMES.forEach((t) => {
+      adminThemeMap.set(t.slug.toLowerCase(), {
+        ...t,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        _id: t.id,
+      });
+    });
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from("themes")
+          .select("*")
+          .order("displayOrder", { ascending: true });
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          data.forEach((dbT: any) => {
+            const cleanSlug = (dbT.slug || "").toLowerCase();
+            const existing = adminThemeMap.get(cleanSlug);
+            adminThemeMap.set(cleanSlug, {
+              ...existing,
+              ...dbT,
+              type: existing?.type || (cleanSlug.includes("diwali") ? "seasonal" : cleanSlug.includes("misc") ? "miscellaneous" : "permanent"),
+              productTypes: existing?.productTypes || dbT.productTypes || [],
+              defaultKeywords: existing?.defaultKeywords || dbT.defaultKeywords || [],
+              _id: dbT.id,
+            });
+          });
+        }
+      } catch (err: any) {
+        console.warn("[db.getThemes] Fallback to admin themes:", err.message);
+      }
+    }
+
+    return Array.from(adminThemeMap.values()).sort((a, b) => (a.displayOrder || 99) - (b.displayOrder || 99));
+  },
+
+  async getThemeBySlug(slug: string): Promise<ThemeRecord | null> {
+    const clean = slug.toLowerCase().trim();
+    const themes = await this.getThemes();
+    const found = themes.find((t) => t.slug.toLowerCase() === clean || t.id.toLowerCase() === clean);
+    return found || null;
+  },
+
+  // ── CATEGORIES ─────────────────────────────────────────────────────────────
+  async getCategories(): Promise<CategoryRecord[]> {
+    const catMap = new Map<string, CategoryRecord>();
+
+    // 1. Preload all canonical e-commerce categories with rich subcategories
+    CANONICAL_CATEGORIES.forEach((c) => {
+      catMap.set(c.slug.toLowerCase(), {
+        ...c,
+        createdAt: new Date().toISOString(),
+        _id: c.id,
+      });
+      catMap.set(c.name.toLowerCase(), {
+        ...c,
+        createdAt: new Date().toISOString(),
+        _id: c.id,
+      });
+    });
+
+    // 2. Query Supabase and merge any custom database categories or overrides
     const supabase = getSupabase();
     if (supabase) {
-      let query = supabase.from("products").select("*");
-      if (filters?.category && filters.category !== "All") {
-        query = query.ilike("category", filters.category);
+      try {
+        const { data, error } = await supabase
+          .from("categories")
+          .select("*")
+          .order("name", { ascending: true });
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          data.forEach((r: any) => {
+            const slug = (r.slug || r.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")).toLowerCase();
+            const canonical = catMap.get(slug) || catMap.get(r.name.toLowerCase());
+            catMap.set(slug, {
+              id: r.id || `cat_${slug}`,
+              name: r.name,
+              slug,
+              icon: r.icon || canonical?.icon || "🏷️",
+              description: r.description || canonical?.description || "",
+              displayOrder: r.displayOrder || canonical?.displayOrder || 99,
+              isActive: r.isActive !== false,
+              subcategories: canonical?.subcategories || [],
+              amazonSearchIndex: canonical?.amazonSearchIndex || "All",
+              createdAt: r.createdAt || new Date().toISOString(),
+              _id: r.id || `cat_${slug}`,
+            });
+          });
+        }
+      } catch (err: any) {
+        console.warn("[db.getCategories] Fallback:", err.message);
       }
+    }
+
+    // Return unique categories sorted by displayOrder then name
+    const unique = Array.from(new Set(Array.from(catMap.values()).map((c) => c.slug)))
+      .map((slug) => catMap.get(slug)!)
+      .sort((a, b) => (a.displayOrder || 99) - (b.displayOrder || 99) || a.name.localeCompare(b.name));
+
+    return unique;
+  },
+
+  async getCategoryById(id: string): Promise<CategoryRecord | null> {
+    const categories = await this.getCategories();
+    const clean = id.toLowerCase().trim();
+    const found = categories.find((c) => c.id.toLowerCase() === clean || c.slug.toLowerCase() === clean || c.name.toLowerCase() === clean);
+    return found || null;
+  },
+
+  async createCategory(name: string, icon = "🏷️", description = ""): Promise<CategoryRecord | null> {
+    const id = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || `cat-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const supabase = getSupabase();
+    if (!supabase) {
+      return { id, name: name.trim(), icon, slug, description, createdAt: now, _id: id };
+    }
+
+    const { data, error } = await supabase
+      .from("categories")
+      .upsert({ id, name: name.trim(), icon, slug, description, createdAt: now }, { onConflict: "slug" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[Supabase createCategory error]", error);
+      throw new Error(error.message);
+    }
+    return data ? { ...data, _id: data.id } : null;
+  },
+
+  async deleteCategory(id: string): Promise<CategoryRecord | null> {
+    const cat = await this.getCategoryById(id);
+    if (!cat) return null;
+
+    const supabase = getSupabase();
+    if (supabase) {
+      await supabase.from("categories").delete().eq("id", id);
+    }
+    return cat;
+  },
+
+  // ── COLLECTIONS ────────────────────────────────────────────────────────────
+  async getCollections(): Promise<CollectionRecord[]> {
+    const supabase = getSupabase();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from("collections").select("*").eq("isActive", true);
+        if (!error && Array.isArray(data) && data.length > 0) {
+          return data.map((c) => ({ ...c, _id: c.id }));
+        }
+      } catch (err: any) {
+        console.warn("[db.getCollections] Fallback:", err.message);
+      }
+    }
+
+    return SEASONAL_COLLECTIONS.map((c) => ({
+      ...c,
+      createdAt: new Date().toISOString(),
+      _id: c.id,
+    }));
+  },
+
+  // ── PRODUCTS (MULTI-THEME, MULTI-CATEGORY, DEDUPLICATED) ───────────────────
+  async getProducts(filters?: ProductFilters): Promise<ProductRecord[]> {
+    const supabase = getSupabase();
+
+    if (supabase) {
+      let query = supabase.from("products").select("*");
+
+      // Handle category filter (canonical slug, name, or primary category)
+      if (filters?.category && filters.category !== "All" && filters.category !== "all") {
+        const catSlug = filters.category.toLowerCase().trim();
+        // Check if product_categories mapping table is populated
+        try {
+          const { data: catMap } = await supabase
+            .from("product_categories")
+            .select("productId, categoryId, categories!inner(slug, name)")
+            .or(`slug.eq.${catSlug},name.ilike.%${catSlug}%`, { foreignTable: "categories" });
+
+          if (Array.isArray(catMap) && catMap.length > 0) {
+            const productIds = Array.from(new Set(catMap.map((m: any) => m.productId)));
+            query = query.in("id", productIds);
+          } else {
+            // Fallback to legacy string column or description search
+            query = query.or(`category.ilike.%${filters.category}%,description.ilike.%${catSlug}%`);
+          }
+        } catch {
+          query = query.or(`category.ilike.%${filters.category}%,description.ilike.%${catSlug}%`);
+        }
+      }
+
+      // Handle theme filter
+      if (filters?.theme && filters.theme !== "All" && filters.theme !== "all") {
+        const themeSlug = filters.theme.toLowerCase().trim();
+        try {
+          const { data: themeMap } = await supabase
+            .from("product_themes")
+            .select("productId, themeId, themes!inner(slug, name)")
+            .or(`slug.eq.${themeSlug},name.ilike.%${themeSlug}%`, { foreignTable: "themes" });
+
+          if (Array.isArray(themeMap) && themeMap.length > 0) {
+            const productIds = Array.from(new Set(themeMap.map((m: any) => m.productId)));
+            query = query.in("id", productIds);
+          } else {
+            // Fallback: description embedded tag or keyword match
+            query = query.ilike("description", `%${themeSlug}%`);
+          }
+        } catch {
+          query = query.ilike("description", `%${themeSlug}%`);
+        }
+      }
+
+      // Handle collection filter (e.g. festival-special-diwali)
+      if (filters?.collection && filters.collection !== "All" && filters.collection !== "all") {
+        const colSlug = filters.collection.toLowerCase().trim();
+        try {
+          const { data: colMap } = await supabase
+            .from("product_collections")
+            .select("productId, collectionId, collections!inner(slug)")
+            .eq("collections.slug", colSlug);
+
+          if (Array.isArray(colMap) && colMap.length > 0) {
+            const productIds = Array.from(new Set(colMap.map((m: any) => m.productId)));
+            query = query.in("id", productIds);
+          } else {
+            query = query.ilike("description", `%${colSlug}%`);
+          }
+        } catch {
+          query = query.ilike("description", `%${colSlug}%`);
+        }
+      }
+
       if (filters?.featured !== undefined) {
         query = query.eq("featured", filters.featured);
       }
+
       if (filters?.search) {
-        const term = `%${filters.search}%`;
-        query = query.or(`title.ilike.${term},subtitle.ilike.${term},category.ilike.${term},badge.ilike.${term}`);
+        const term = `%${filters.search.trim()}%`;
+        query = query.or(`title.ilike.${term},subtitle.ilike.${term},category.ilike.${term},badge.ilike.${term},description.ilike.${term}`);
       }
-      query = query.order("featured", { ascending: false }).order("createdAt", { ascending: false });
+
+      // Sorting
+      if (filters?.sort === "rating") {
+        query = query.order("rating", { ascending: false }).order("reviews", { ascending: false });
+      } else if (filters?.sort === "price-asc") {
+        query = query.order("price", { ascending: true });
+      } else if (filters?.sort === "price-desc") {
+        query = query.order("price", { ascending: false });
+      } else if (filters?.sort === "newest") {
+        query = query.order("createdAt", { ascending: false });
+      } else {
+        query = query.order("featured", { ascending: false }).order("createdAt", { ascending: false });
+      }
+
       if (filters?.limit) {
         query = query.limit(filters.limit);
       }
+
       const { data, error } = await query;
       if (error) {
         console.error("[Supabase getProducts error]", error);
         return [];
       }
-      return (data || []).map(formatProduct);
+
+      const formatted = (data || []).map(formatProduct);
+
+      // Post-filter for theme/category if database table joins were not populated yet
+      let results = formatted;
+      if (filters?.theme && filters.theme !== "All" && filters.theme !== "all") {
+        const cleanTheme = filters.theme.toLowerCase().trim();
+        results = results.filter((p) => p.themes.includes(cleanTheme) || p.description.toLowerCase().includes(cleanTheme));
+      }
+      if (filters?.category && filters.category !== "All" && filters.category !== "all") {
+        const cleanCat = filters.category.toLowerCase().trim();
+        results = results.filter((p) => p.categories.includes(cleanCat) || p.category.toLowerCase().includes(cleanCat));
+      }
+      if (filters?.status && filters.status !== "all") {
+        results = results.filter((p) => p.analysisStatus === filters.status);
+      }
+
+      return results;
     }
 
     // Static Fallback when Supabase is not configured
     let products = Array.isArray(productsJsonFallback) ? (productsJsonFallback as any[]).map(formatProduct) : [];
-    if (filters?.category && filters.category !== "All") {
-      products = products.filter((p) => p.category.toLowerCase() === filters.category!.toLowerCase());
+
+    if (filters?.theme && filters.theme !== "All" && filters.theme !== "all") {
+      const cleanTheme = filters.theme.toLowerCase().trim();
+      products = products.filter((p) => p.themes.includes(cleanTheme));
+    }
+    if (filters?.category && filters.category !== "All" && filters.category !== "all") {
+      const cleanCat = filters.category.toLowerCase().trim();
+      products = products.filter((p) => p.categories.includes(cleanCat) || p.category.toLowerCase() === cleanCat);
     }
     if (filters?.featured !== undefined) {
       products = products.filter((p) => Boolean(p.featured) === filters.featured);
@@ -354,8 +792,13 @@ export const db = {
           p.title?.toLowerCase().includes(q) ||
           p.subtitle?.toLowerCase().includes(q) ||
           p.category?.toLowerCase().includes(q) ||
+          p.categories?.some((c) => c.toLowerCase().includes(q)) ||
+          p.themes?.some((t) => t.toLowerCase().includes(q)) ||
           p.badge?.toLowerCase().includes(q)
       );
+    }
+    if (filters?.status && filters.status !== "all") {
+      products = products.filter((p) => p.analysisStatus === filters.status);
     }
     if (filters?.limit) {
       products = products.slice(0, filters.limit);
@@ -374,11 +817,56 @@ export const db = {
         .select("*")
         .eq("id", idStr)
         .maybeSingle();
+
       if (error) {
         console.error("[Supabase getProductById error]", error);
         return null;
       }
-      return data ? formatProduct(data) : null;
+      if (!data) return null;
+
+      const product = formatProduct(data);
+
+      // Fetch many-to-many category & theme mappings from database tables if present
+      try {
+        const [catRes, themeRes] = await Promise.all([
+          supabase.from("product_categories").select("*, categories(name, slug)").eq("productId", idStr),
+          supabase.from("product_themes").select("*, themes(name, slug)").eq("productId", idStr),
+        ]);
+
+        if (Array.isArray(catRes.data) && catRes.data.length > 0) {
+          product.categoryMappings = catRes.data.map((m: any) => ({
+            id: m.id,
+            productId: m.productId,
+            categoryId: m.categoryId,
+            categorySlug: m.categories?.slug,
+            categoryName: m.categories?.name,
+            source: m.source,
+            confidenceScore: Number(m.confidenceScore || 1.0),
+            reviewStatus: m.reviewStatus,
+            createdAt: m.createdAt,
+          }));
+          product.categories = product.categoryMappings.map((m) => m.categorySlug || "").filter(Boolean);
+        }
+
+        if (Array.isArray(themeRes.data) && themeRes.data.length > 0) {
+          product.themeMappings = themeRes.data.map((m: any) => ({
+            id: m.id,
+            productId: m.productId,
+            themeId: m.themeId,
+            themeSlug: m.themes?.slug,
+            themeName: m.themes?.name,
+            source: m.source,
+            confidenceScore: Number(m.confidenceScore || 1.0),
+            reviewStatus: m.reviewStatus,
+            createdAt: m.createdAt,
+          }));
+          product.themes = product.themeMappings.map((m) => m.themeSlug || "").filter(Boolean);
+        }
+      } catch (err: any) {
+        // Soft fallback to embedded description attributes
+      }
+
+      return product;
     }
 
     // Static Fallback
@@ -386,21 +874,33 @@ export const db = {
     return found ? formatProduct(found) : null;
   },
 
-  async createProduct(data: CreateProductInput): Promise<ProductRecord | null> {
+  // ── CORE CANONICAL PRODUCT UPSERT SERVICE ─────────────────────────────────
+  async upsertProduct(data: CreateProductInput, options?: { sourceRule?: AssignmentSource }): Promise<ProductRecord | null> {
     const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
-
     const effectiveSource = determineProductSource(data);
     const now = new Date().toISOString();
 
-    // ── Deduplication Guard ─────────────────────────────────────────────
-    // Check if product already exists in database (by ASIN, URL, or Title+Category)
+    const asin = extractAsin(data.affiliateLink) || extractAsin(data.id);
+    const canonicalId = asin ? generateCanonicalProductId(asin, effectiveSource) : (data.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+
+    // 1. Resolve Categories & Themes (Auto-map legacy if not explicitly provided)
+    let assignedCategories = Array.isArray(data.categories) && data.categories.length > 0
+      ? data.categories
+      : (data.category ? mapLegacyCategoryToTaxonomy(data.category, data.title).categories : ["home-kitchen"]);
+
+    let assignedThemes = Array.isArray(data.themes)
+      ? data.themes
+      : (data.category ? mapLegacyCategoryToTaxonomy(data.category, data.title).themes : []);
+
+    let assignedCollections = Array.isArray(data.collections)
+      ? data.collections
+      : (data.category ? mapLegacyCategoryToTaxonomy(data.category, data.title).collections || [] : []);
+
+    // 2. Check for existing product in catalog (by ASIN, URL, or Title)
     const existingList = await this.getProducts({ limit: 5000 });
     const duplicate = findDuplicateInList(
       {
-        id: data.id,
+        id: canonicalId,
         title: data.title,
         category: data.category,
         affiliateLink: data.affiliateLink,
@@ -409,8 +909,36 @@ export const db = {
       existingList
     );
 
+    // Compute data fingerprint
+    const fingerprint = data.dataFingerprint || computeProductDataFingerprint({
+      title: data.title,
+      description: data.description,
+      brand: data.unitPrice,
+    });
+
+    const primaryCategory = data.category || assignedCategories[0] || "home-kitchen";
+    const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
+    const primaryImage = data.image || imagesArray[0] || "";
+
+    // ── CASE A: Update existing canonical product ──────────────────────────
     if (duplicate) {
-      console.log(`[db.createProduct] Duplicate detected for "${data.title}" (ID: ${duplicate.id}, Source: ${duplicate.source}). Updating existing record instead of inserting.`);
+      console.log(`[db.upsertProduct] Updating canonical record for "${data.title}" (ID: ${duplicate.id}).`);
+
+      // Preserve manually curated fields if the existing product had manual assignment
+      const manualCategoryAssignments = duplicate.categoryMappings?.filter((m) => m.source === "manual") || [];
+      const manualThemeAssignments = duplicate.themeMappings?.filter((m) => m.source === "manual") || [];
+
+      if (manualCategoryAssignments.length > 0 && options?.sourceRule !== "manual") {
+        assignedCategories = Array.from(new Set([...assignedCategories, ...manualCategoryAssignments.map((m) => m.categorySlug || "")]));
+      }
+      if (manualThemeAssignments.length > 0 && options?.sourceRule !== "manual") {
+        assignedThemes = Array.from(new Set([...assignedThemes, ...manualThemeAssignments.map((m) => m.themeSlug || "")]));
+      }
+
+      // Preserve AI analysis if data fingerprint is identical
+      const isUnchanged = duplicate.dataFingerprint === fingerprint;
+      const effectiveStatus: AnalysisStatus = data.analysisStatus || (isUnchanged ? duplicate.analysisStatus : "PENDING_ANALYSIS");
+
       return await this.updateProduct(duplicate.id, {
         title: data.title,
         subtitle: data.subtitle || duplicate.subtitle,
@@ -418,15 +946,20 @@ export const db = {
         price: data.price,
         originalPrice: data.originalPrice || duplicate.originalPrice,
         unitPrice: data.unitPrice || duplicate.unitPrice,
-        category: data.category || duplicate.category,
-        image: data.image || duplicate.image,
-        images: data.images && data.images.length > 0 ? data.images : duplicate.images,
+        category: primaryCategory,
+        categories: assignedCategories,
+        themes: assignedThemes,
+        collections: assignedCollections,
+        image: primaryImage || duplicate.image,
+        images: imagesArray.length > 0 ? imagesArray : duplicate.images,
         affiliateLink: data.affiliateLink || duplicate.affiliateLink,
         badge: data.badge || duplicate.badge,
         rating: data.rating !== undefined && data.rating !== null ? Number(data.rating) : duplicate.rating,
         reviews: data.reviews !== undefined && data.reviews !== null ? Number(data.reviews) : duplicate.reviews,
         featured: Boolean(data.featured !== undefined ? data.featured : duplicate.featured),
         source: effectiveSource,
+        analysisStatus: effectiveStatus,
+        dataFingerprint: fingerprint,
         aiScore: data.aiScore !== undefined && data.aiScore !== null ? Number(data.aiScore) : duplicate.aiScore,
         aiScoreBreakdown: data.aiScoreBreakdown || duplicate.aiScoreBreakdown,
         rank: data.rank !== undefined ? Number(data.rank) : duplicate.rank,
@@ -443,41 +976,46 @@ export const db = {
       });
     }
 
-    const id = data.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const imagesArray = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
-    const primaryImage = data.image || imagesArray[0] || "";
+    // ── CASE B: Insert new canonical product ───────────────────────────────
+    if (!supabase) {
+      return null;
+    }
 
-    // Embed structured metadata (including source) in description for resilient persistence
-    let finalDescription = data.description || "";
+    // Embed structured multi-taxonomy metadata in description
     const aiMeta = {
       source: effectiveSource,
+      categories: assignedCategories,
+      themes: assignedThemes,
+      collections: assignedCollections,
+      analysisStatus: data.analysisStatus || "PENDING_ANALYSIS",
+      dataFingerprint: fingerprint,
       aiScore: data.aiScore,
       scoreBreakdown: data.aiScoreBreakdown,
       rank: data.rank,
       award: data.award,
       aiSummary: data.aiSummary,
-      pros: data.pros,
-      cons: data.cons,
+      pros: data.pros || [],
+      cons: data.cons || [],
       bestFor: data.bestFor,
       recommendationReason: data.recommendationReason,
-      confidenceLevel: data.confidenceLevel,
+      confidenceLevel: data.confidenceLevel || "high",
       curationStatus: data.curationStatus || "approved",
       dataQualityFlags: data.dataQualityFlags || [],
       lastAnalyzedAt: data.lastAnalyzedAt || now,
     };
-    if (!finalDescription.includes("<!-- AI_DATA:")) {
-      finalDescription = `${finalDescription}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
-    }
+
+    let cleanDesc = (data.description || "").replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim();
+    const finalDescription = `${cleanDesc}\n\n<!-- AI_DATA: ${JSON.stringify(aiMeta)} -->`;
 
     const newRecord: any = {
-      id,
+      id: canonicalId,
       title: data.title,
       subtitle: data.subtitle || data.title,
       description: finalDescription,
       price: data.price,
       originalPrice: data.originalPrice || data.price,
       unitPrice: data.unitPrice || "",
-      category: data.category,
+      category: primaryCategory,
       image: primaryImage,
       images: imagesArray,
       instagramUrl: data.instagramUrl || "",
@@ -490,141 +1028,38 @@ export const db = {
       updatedAt: now,
     };
 
-    // Attempt insert with native 'source' column; fallback gracefully if column not yet added to SQL
-    let created: any = null;
-    const withSource = { ...newRecord, source: effectiveSource };
-    const { data: resData, error: insertError } = await supabase
+    const { data: created, error } = await supabase
       .from("products")
-      .insert(withSource)
+      .insert(newRecord)
       .select()
       .single();
 
-    if (insertError && insertError.message.includes("source")) {
-      const { data: fallbackData, error: fallbackError } = await supabase
-        .from("products")
-        .insert(newRecord)
-        .select()
-        .single();
-      if (fallbackError) {
-        console.error("[Supabase createProduct fallback error]", fallbackError);
-        throw new Error(fallbackError.message);
-      }
-      created = fallbackData;
-    } else if (insertError) {
-      console.error("[Supabase createProduct error]", insertError);
-      throw new Error(insertError.message);
-    } else {
-      created = resData;
+    if (error) {
+      console.error("[Supabase upsertProduct insert error]", error);
+      throw new Error(error.message);
     }
+
+    // Attempt to populate relational mapping tables if active in Supabase
+    await this.syncProductMappings(canonicalId, assignedCategories, assignedThemes, options?.sourceRule || "api");
 
     return created ? formatProduct(created) : null;
   },
 
-  async checkExistingAsins(asins: string[]): Promise<string[]> {
-    if (!asins || asins.length === 0) return [];
-    const allProducts = await this.getProducts({ limit: 5000 });
-    const existingAsinSet = new Set<string>();
-
-    for (const p of allProducts) {
-      const asin = extractAsin(p.affiliateLink) || extractAsin(p.id);
-      if (asin) existingAsinSet.add(asin.toUpperCase());
-    }
-
-    const found: string[] = [];
-    for (const candidate of asins) {
-      const clean = extractAsin(candidate) || candidate.trim().toUpperCase();
-      if (existingAsinSet.has(clean)) {
-        found.push(clean);
-      }
-    }
-    return found;
-  },
-
-  async createProductsBatch(records: CreateProductInput[]): Promise<{ added: ProductRecord[]; updated: ProductRecord[]; count: number }> {
-    if (!records || records.length === 0) return { added: [], updated: [], count: 0 };
-    const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
-
-    // 1. Deduplicate within the incoming batch itself first
-    const dedupedIncoming: CreateProductInput[] = [];
-    for (const rec of records) {
-      const existingInBatch = findDuplicateInList(rec, dedupedIncoming as any);
-      if (!existingInBatch) {
-        dedupedIncoming.push(rec);
-      } else {
-        const idx = dedupedIncoming.indexOf(existingInBatch as any);
-        if (idx !== -1) {
-          dedupedIncoming[idx] = { ...existingInBatch, ...rec };
-        }
-      }
-    }
-
-    // 2. Fetch all existing products from database to prevent duplicate inserts
-    const existingList = await this.getProducts({ limit: 5000 });
-    const added: ProductRecord[] = [];
-    const updated: ProductRecord[] = [];
-
-    for (const item of dedupedIncoming) {
-      const duplicate = findDuplicateInList(item, existingList);
-      if (duplicate) {
-        const up = await this.updateProduct(duplicate.id, {
-          title: item.title,
-          subtitle: item.subtitle || duplicate.subtitle,
-          description: item.description || duplicate.description,
-          price: item.price,
-          originalPrice: item.originalPrice || duplicate.originalPrice,
-          unitPrice: item.unitPrice || duplicate.unitPrice,
-          category: item.category || duplicate.category,
-          image: item.image || duplicate.image,
-          images: item.images && item.images.length > 0 ? item.images : duplicate.images,
-          affiliateLink: item.affiliateLink || duplicate.affiliateLink,
-          badge: item.badge || duplicate.badge,
-          rating: item.rating !== undefined && item.rating !== null ? Number(item.rating) : duplicate.rating,
-          reviews: item.reviews !== undefined && item.reviews !== null ? Number(item.reviews) : duplicate.reviews,
-          featured: Boolean(item.featured !== undefined ? item.featured : duplicate.featured),
-          source: determineProductSource(item),
-          aiScore: item.aiScore !== undefined && item.aiScore !== null ? Number(item.aiScore) : duplicate.aiScore,
-          aiScoreBreakdown: item.aiScoreBreakdown || duplicate.aiScoreBreakdown,
-          rank: item.rank !== undefined ? Number(item.rank) : duplicate.rank,
-          award: item.award || duplicate.award,
-          aiSummary: item.aiSummary || duplicate.aiSummary,
-          pros: item.pros && item.pros.length > 0 ? item.pros : duplicate.pros,
-          cons: item.cons && item.cons.length > 0 ? item.cons : duplicate.cons,
-          bestFor: item.bestFor || duplicate.bestFor,
-          recommendationReason: item.recommendationReason || duplicate.recommendationReason,
-          curationStatus: item.curationStatus || duplicate.curationStatus,
-          confidenceLevel: item.confidenceLevel || duplicate.confidenceLevel,
-          dataQualityFlags: item.dataQualityFlags || duplicate.dataQualityFlags,
-          lastAnalyzedAt: item.lastAnalyzedAt || duplicate.lastAnalyzedAt,
-        });
-        if (up) updated.push(up);
-      } else {
-        const cr = await this.createProduct(item);
-        if (cr) {
-          added.push(cr);
-          existingList.push(cr); // immediately register in local cache for subsequent items
-        }
-      }
-    }
-
-    return { added, updated, count: added.length + updated.length };
-  },
-
+  // ── UPDATE PRODUCT ────────────────────────────────────────────────────────
   async updateProduct(id: string | number, data: ProductInput): Promise<ProductRecord | null> {
     const supabase = getSupabase();
     const idStr = String(id).trim();
 
     if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+      throw new Error("Supabase is not configured.");
     }
 
+    const existingProduct = await this.getProductById(idStr);
     const now = new Date().toISOString();
     const updateData: any = { updatedAt: now };
+
     if (data.title !== undefined) updateData.title = data.title;
     if (data.subtitle !== undefined) updateData.subtitle = data.subtitle;
-    if (data.description !== undefined) updateData.description = data.description;
     if (data.price !== undefined) updateData.price = data.price;
     if (data.originalPrice !== undefined) updateData.originalPrice = data.originalPrice;
     if (data.unitPrice !== undefined) updateData.unitPrice = data.unitPrice;
@@ -642,15 +1077,31 @@ export const db = {
     if (data.rating !== undefined && data.rating !== null) updateData.rating = Number(data.rating);
     if (data.reviews !== undefined && data.reviews !== null) updateData.reviews = Number(data.reviews);
     if (data.featured !== undefined) updateData.featured = Boolean(data.featured);
-    if (data.source !== undefined) updateData.source = data.source;
+    // Note: source is stored inside the embedded description metadata (aiMeta)
+    // rather than direct column to match the active Supabase schema.
 
-    // AI & Source metadata update support in description
-    const existingProduct = await this.getProductById(idStr);
-    const effectiveSource = data.source || existingProduct?.source || "amazon";
-    const cleanDesc = (data.description !== undefined ? data.description : existingProduct?.description || "").replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim();
+    // AI & Multi-Taxonomy metadata packaging
+    const effectiveCategories = data.categories || existingProduct?.categories || [updateData.category || "home-kitchen"];
+    const effectiveThemes = data.themes !== undefined ? data.themes : (existingProduct?.themes || []);
+    const effectiveCollections = data.collections !== undefined ? data.collections : (existingProduct?.collections || []);
+    const effectiveStatus = data.analysisStatus || existingProduct?.analysisStatus || "ANALYZED";
+    const fingerprint = data.dataFingerprint || existingProduct?.dataFingerprint || computeProductDataFingerprint({
+      title: data.title || existingProduct?.title || "",
+      description: data.description || existingProduct?.description || "",
+      brand: data.unitPrice || existingProduct?.unitPrice,
+    });
+
+    const cleanDesc = (data.description !== undefined ? data.description : existingProduct?.description || "")
+      .replace(/<!-- AI_DATA:[\s\S]*?-->/g, "")
+      .trim();
 
     const aiMeta = {
-      source: effectiveSource,
+      source: data.source || existingProduct?.source || "amazon",
+      categories: effectiveCategories,
+      themes: effectiveThemes,
+      collections: effectiveCollections,
+      analysisStatus: effectiveStatus,
+      dataFingerprint: fingerprint,
       aiScore: data.aiScore !== undefined ? data.aiScore : existingProduct?.aiScore,
       scoreBreakdown: data.aiScoreBreakdown || existingProduct?.aiScoreBreakdown,
       rank: data.rank !== undefined ? data.rank : existingProduct?.rank,
@@ -676,22 +1127,176 @@ export const db = {
 
     if (error && error.message.includes("source")) {
       delete updateData.source;
-      const res = await supabase
-        .from("products")
-        .update(updateData)
-        .eq("id", idStr)
-        .select()
-        .maybeSingle();
-      if (res.error) {
-        console.error("[Supabase updateProduct fallback error]", res.error);
-        throw new Error(res.error.message);
-      }
+      const res = await supabase.from("products").update(updateData).eq("id", idStr).select().maybeSingle();
+      if (res.error) throw new Error(res.error.message);
       updated = res.data;
     } else if (error) {
-      console.error("[Supabase updateProduct error]", error);
       throw new Error(error.message);
     }
+
+    // Sync relational mapping tables
+    await this.syncProductMappings(idStr, effectiveCategories, effectiveThemes, "manual");
+
     return updated ? formatProduct(updated) : null;
+  },
+
+  // ── SYNCHRONIZE PRODUCT MAPPINGS (MAPPING TABLES) ─────────────────────────
+  async syncProductMappings(
+    productId: string,
+    categories: string[],
+    themes: string[],
+    source: AssignmentSource = "ai"
+  ): Promise<void> {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const now = new Date().toISOString();
+
+    // 1. Sync Product Categories
+    try {
+      const allCats = await this.getCategories();
+      const validCategoryIds: string[] = [];
+
+      for (const catSlug of categories) {
+        const found = allCats.find((c) => c.slug.toLowerCase() === catSlug.toLowerCase() || c.name.toLowerCase() === catSlug.toLowerCase());
+        if (found) validCategoryIds.push(found.id);
+      }
+
+      if (validCategoryIds.length > 0) {
+        const catRows = validCategoryIds.map((catId) => ({
+          id: `pc_${productId}_${catId}`.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 60),
+          productId,
+          categoryId: catId,
+          source,
+          confidenceScore: 0.95,
+          reviewStatus: "approved",
+          createdAt: now,
+          updatedAt: now,
+        }));
+        await supabase.from("product_categories").upsert(catRows, { onConflict: "productId,categoryId" });
+      }
+    } catch {
+      // Ignored if table not created yet in SQL editor
+    }
+
+    // 2. Sync Product Themes
+    try {
+      const allThemes = await this.getThemes();
+      const validThemeIds: string[] = [];
+
+      for (const themeSlug of themes) {
+        const found = allThemes.find((t) => t.slug.toLowerCase() === themeSlug.toLowerCase() || t.id.toLowerCase() === themeSlug.toLowerCase());
+        if (found) validThemeIds.push(found.id);
+      }
+
+      if (validThemeIds.length > 0) {
+        const themeRows = validThemeIds.map((thId) => ({
+          id: `pt_${productId}_${thId}`.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 60),
+          productId,
+          themeId: thId,
+          source,
+          confidenceScore: 0.95,
+          reviewStatus: "approved",
+          createdAt: now,
+          updatedAt: now,
+        }));
+        await supabase.from("product_themes").upsert(themeRows, { onConflict: "productId,themeId" });
+      }
+    } catch {
+      // Ignored if table not created yet in SQL editor
+    }
+  },
+
+  // ── SAVE AI ANALYSIS & CLASSIFICATIONS ────────────────────────────────────
+  async saveAIAnalysis(
+    productId: string,
+    analysis: {
+      provider: string;
+      model: string;
+      promptVersion: string;
+      shortSummary: string;
+      keyFeatures?: string[];
+      pros?: string[];
+      cons?: string[];
+      bestFor?: string;
+      comparisonAttributes?: Record<string, any>;
+      recommendationExplanation?: string;
+      categories: Array<{ slug: string; confidence: number }>;
+      themes: Array<{ slug: string; confidence: number }>;
+      status?: AnalysisStatus;
+      dataFingerprint?: string;
+      overallScore?: number;
+      rank?: number;
+      award?: string;
+    }
+  ): Promise<ProductRecord | null> {
+    const supabase = getSupabase();
+    const now = new Date().toISOString();
+
+    const categorySlugs = analysis.categories.map((c) => c.slug);
+    const themeSlugs = analysis.themes.map((t) => t.slug);
+    const finalStatus = analysis.status || "ANALYZED";
+
+    // 1. Try to record in ai_product_analyses audit table
+    if (supabase) {
+      try {
+        const analysisId = `aia_${productId}_${Date.now()}`;
+        await supabase.from("ai_product_analyses").insert({
+          id: analysisId,
+          productId,
+          provider: analysis.provider,
+          model: analysis.model,
+          promptVersion: analysis.promptVersion,
+          shortSummary: analysis.shortSummary,
+          keyFeatures: analysis.keyFeatures || [],
+          pros: analysis.pros || [],
+          cons: analysis.cons || [],
+          bestFor: analysis.bestFor || "",
+          comparisonAttributes: analysis.comparisonAttributes || {},
+          recommendationExplanation: analysis.recommendationExplanation || "",
+          status: finalStatus,
+          dataFingerprint: analysis.dataFingerprint || "",
+          createdAt: now,
+          updatedAt: now,
+        });
+      } catch {
+        // Ignored if table not created yet in SQL editor
+      }
+    }
+
+    // 2. Update canonical product with fresh AI attributes and mappings
+    return await this.updateProduct(productId, {
+      categories: categorySlugs,
+      themes: themeSlugs,
+      aiSummary: analysis.shortSummary,
+      bestFor: analysis.bestFor,
+      recommendationReason: analysis.recommendationExplanation,
+      pros: analysis.pros,
+      cons: analysis.cons,
+      aiScore: analysis.overallScore,
+      rank: analysis.rank,
+      award: analysis.award,
+      analysisStatus: finalStatus,
+      dataFingerprint: analysis.dataFingerprint,
+      lastAnalyzedAt: now,
+    });
+  },
+
+  // ── PENDING AI ANALYSIS QUEUE ─────────────────────────────────────────────
+  async getPendingAnalysisProducts(limit = 20): Promise<ProductRecord[]> {
+    const all = await this.getProducts({ limit: 500 });
+    return all.filter((p) => p.analysisStatus === "PENDING_ANALYSIS" || p.analysisStatus === "DISCOVERED").slice(0, limit);
+  },
+
+  async updateAnalysisStatus(productId: string, status: AnalysisStatus, errorMessage?: string): Promise<ProductRecord | null> {
+    return await this.updateProduct(productId, {
+      analysisStatus: status,
+      ...(errorMessage ? { badge: `Err: ${errorMessage.slice(0, 30)}` } : {}),
+    });
+  },
+
+  async createProduct(data: CreateProductInput): Promise<ProductRecord | null> {
+    return await this.upsertProduct(data, { sourceRule: "api" });
   },
 
   async deleteProduct(id: string | number): Promise<ProductRecord | null> {
@@ -700,7 +1305,7 @@ export const db = {
 
     const supabase = getSupabase();
     if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+      throw new Error("Supabase is not configured.");
     }
 
     const { error } = await supabase.from("products").delete().eq("id", product.id);
@@ -711,74 +1316,42 @@ export const db = {
     return product;
   },
 
-  // CATEGORIES
-  async getCategories(): Promise<CategoryRecord[]> {
-    const supabase = getSupabase();
-    if (supabase) {
-      const { data, error } = await supabase.from("categories").select("*").order("name", { ascending: true });
-      if (error) {
-        console.error("[Supabase getCategories error]", error);
-        return [];
+  async createProductsBatch(records: CreateProductInput[]): Promise<{ added: ProductRecord[]; updated: ProductRecord[]; count: number }> {
+    if (!records || records.length === 0) return { added: [], updated: [], count: 0 };
+    const added: ProductRecord[] = [];
+    const updated: ProductRecord[] = [];
+
+    for (const item of records) {
+      const up = await this.upsertProduct(item);
+      if (up) {
+        added.push(up);
       }
-      return (data || []).map((r) => {
-        const cleanIcon = (!r.icon || r.icon.includes("?")) ? (DEFAULT_CATEGORY_ICONS[r.name] || "🏷️") : r.icon;
-        return { ...r, icon: cleanIcon, _id: r.id };
-      });
     }
 
-    // Static Fallback
-    return DEFAULT_CATEGORIES;
+    return { added, updated, count: added.length };
   },
 
-  async getCategoryById(id: string): Promise<CategoryRecord | null> {
-    const supabase = getSupabase();
-    if (supabase) {
-      const { data, error } = await supabase.from("categories").select("*").eq("id", id).maybeSingle();
-      if (error || !data) return null;
-      return { ...data, _id: data.id };
+  async checkExistingAsins(asins: string[]): Promise<string[]> {
+    if (!asins || asins.length === 0) return [];
+    const allProducts = await this.getProducts({ limit: 5000 });
+    const existingAsinSet = new Set<string>();
+
+    for (const p of allProducts) {
+      const asin = extractAsin(p.affiliateLink) || extractAsin(p.id);
+      if (asin) existingAsinSet.add(asin.toUpperCase());
     }
 
-    const found = DEFAULT_CATEGORIES.find((c) => c.id === id || c.slug === id);
-    return found ? { ...found, _id: found.id } : null;
+    const found: string[] = [];
+    for (const candidate of asins) {
+      const clean = extractAsin(candidate) || candidate.trim().toUpperCase();
+      if (existingAsinSet.has(clean)) {
+        found.push(clean);
+      }
+    }
+    return found;
   },
 
-  async createCategory(name: string, icon = "🏷️"): Promise<CategoryRecord | null> {
-    const id = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || `cat-${Date.now()}`;
-    const now = new Date().toISOString();
-
-    const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
-
-    const { data, error } = await supabase
-      .from("categories")
-      .upsert({ id, name: name.trim(), icon, slug, createdAt: now }, { onConflict: "name" })
-      .select()
-      .single();
-    if (error) {
-      console.error("[Supabase createCategory error]", error);
-      throw new Error(error.message);
-    }
-    return data ? { ...data, _id: data.id } : null;
-  },
-
-  async deleteCategory(id: string): Promise<CategoryRecord | null> {
-    const cat = await this.getCategoryById(id);
-    if (!cat) return null;
-
-    const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
-
-    const { error } = await supabase.from("categories").delete().eq("id", id);
-    if (error) throw new Error(error.message);
-    return cat;
-  },
-
-  // ADMIN USERS
+  // ── ADMIN USERS ───────────────────────────────────────────────────────────
   async getAdminByEmail(email: string): Promise<(AdminUserRecord & { comparePassword(c: string): boolean }) | null> {
     const cleanEmail = email.toLowerCase().trim();
     const supabase = getSupabase();
@@ -817,7 +1390,6 @@ export const db = {
       };
     }
 
-    // Default In-Memory Admin Fallback for authorized emails when DB is unconfigured
     const authorizedEmails = [
       "salesgoamaze@gmail.com",
       "admin@goamaze.com",
@@ -851,7 +1423,7 @@ export const db = {
 
     const supabase = getSupabase();
     if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+      throw new Error("Supabase is not configured.");
     }
 
     await supabase.from("admins").insert({
@@ -865,7 +1437,7 @@ export const db = {
     return this.getAdminByEmail(cleanEmail);
   },
 
-  // ADMIN OTP METHODS
+  // ── ADMIN OTP METHODS ─────────────────────────────────────────────────────
   async saveAdminOtp(email: string, otp: string, ttlSeconds = 600) {
     const cleanEmail = email.toLowerCase().trim();
     const id = `otp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -874,7 +1446,7 @@ export const db = {
 
     const supabase = getSupabase();
     if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+      throw new Error("Supabase is not configured.");
     }
 
     await supabase.from("admin_otps").delete().eq("email", cleanEmail);
@@ -941,7 +1513,7 @@ export const db = {
     return 0;
   },
 
-  // SUBSCRIBERS
+  // ── SUBSCRIBERS ───────────────────────────────────────────────────────────
   async getSubscribers(): Promise<SubscriberRecord[]> {
     const supabase = getSupabase();
     if (!supabase) return [];
@@ -966,7 +1538,7 @@ export const db = {
 
     const supabase = getSupabase();
     if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+      throw new Error("Supabase is not configured.");
     }
 
     const { data, error } = await supabase.from("subscribers").insert({
@@ -988,7 +1560,7 @@ export const db = {
     return data;
   },
 
-  // BLOGS
+  // ── BLOGS ─────────────────────────────────────────────────────────────────
   async getBlogs(filters?: { category?: string; search?: string; featured?: boolean; published?: boolean; limit?: number }): Promise<BlogRecord[]> {
     const supabase = getSupabase();
     if (!supabase) return [];
@@ -1047,7 +1619,7 @@ export const db = {
 
     const supabase = getSupabase();
     if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+      throw new Error("Supabase is not configured.");
     }
 
     const blogRecord = {
@@ -1074,18 +1646,13 @@ export const db = {
     };
 
     const { data: created, error } = await supabase.from("blogs").insert(blogRecord).select().single();
-    if (error) {
-      console.error("[Supabase createBlog error]", error);
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
     return created ? formatBlog(created) : null;
   },
 
   async updateBlog(id: string, data: BlogInput): Promise<BlogRecord | null> {
     const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
+    if (!supabase) throw new Error("Supabase is not configured.");
 
     const now = new Date().toISOString();
     const updateData: any = { updatedAt: now };
@@ -1100,10 +1667,7 @@ export const db = {
     if (data.published !== undefined) updateData.published = Boolean(data.published);
 
     const { data: updated, error } = await supabase.from("blogs").update(updateData).eq("id", id).select().maybeSingle();
-    if (error) {
-      console.error("[Supabase updateBlog error]", error);
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
     return updated ? formatBlog(updated) : null;
   },
 
@@ -1112,16 +1676,14 @@ export const db = {
     if (!blog) return null;
 
     const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
+    if (!supabase) throw new Error("Supabase is not configured.");
 
     const { error } = await supabase.from("blogs").delete().eq("id", id);
     if (error) throw new Error(error.message);
     return blog;
   },
 
-  // ANALYTICS
+  // ── ANALYTICS ─────────────────────────────────────────────────────────────
   async getAnalytics() {
     const supabase = getSupabase();
     if (supabase) {
@@ -1134,7 +1696,8 @@ export const db = {
       ]);
       return {
         totalProducts: pRes.count || 0,
-        totalCategories: cRes.count || 0,
+        totalCategories: cRes.count || CANONICAL_CATEGORIES.length,
+        totalThemes: PRIMARY_THEMES.length,
         totalSubscribers: sRes.count || 0,
         featuredProducts: fRes.count || 0,
         totalBlogs: bRes.count || 0,
@@ -1143,74 +1706,30 @@ export const db = {
 
     return {
       totalProducts: Array.isArray(productsJsonFallback) ? productsJsonFallback.length : 0,
-      totalCategories: DEFAULT_CATEGORIES.length,
+      totalCategories: CANONICAL_CATEGORIES.length,
+      totalThemes: PRIMARY_THEMES.length,
       totalSubscribers: 0,
       featuredProducts: Array.isArray(productsJsonFallback) ? productsJsonFallback.filter((p: any) => p.featured).length : 0,
       totalBlogs: 0,
     };
   },
 
-  // SEED & SYNC
   async syncCatalog() {
-    const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
-
     const seedItems = Array.isArray(productsJsonFallback) ? productsJsonFallback : [];
     let count = 0;
     for (const p of seedItems) {
-      const id = String(p.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
-      const images = Array.isArray(p.images) && p.images.length > 0 ? p.images : (p.image ? [p.image] : []);
-      await this.createProduct({
+      await this.upsertProduct({
         ...p,
-        id,
-        images,
-        image: p.image || images[0] || "",
-        rating: p.rating ? Number(p.rating) : 4.5,
-        reviews: p.reviews ? Number(p.reviews) : 0,
+        id: String(p.id),
       } as any);
       count++;
     }
-
     const analytics = await this.getAnalytics();
     return { success: true, count, total: analytics.totalProducts };
   },
 
   async reseed() {
-    const supabase = getSupabase();
-    if (!supabase) {
-      throw new Error("Supabase is not configured. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
-    }
-
-    await supabase.from("products").delete().neq("id", "none");
-    await supabase.from("categories").delete().neq("id", "none");
-
-    const now = new Date().toISOString();
-    for (const cat of DEFAULT_CATEGORIES) {
-      await supabase.from("categories").upsert({
-        id: cat.id,
-        name: cat.name,
-        icon: cat.icon,
-        slug: cat.slug,
-        createdAt: now,
-      }, { onConflict: "name" });
-    }
-
-    for (const p of (productsJsonFallback as any[])) {
-      const id = String(p.id || `prod_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
-      const images = Array.isArray(p.images) && p.images.length > 0 ? p.images : (p.image ? [p.image] : []);
-      await this.createProduct({
-        ...p,
-        id,
-        images,
-        image: p.image || images[0] || "",
-        rating: p.rating ? Number(p.rating) : 4.5,
-        reviews: p.reviews ? Number(p.reviews) : 0,
-      } as any);
-    }
-
-    return this.getAnalytics();
+    return await this.syncCatalog();
   },
 };
 

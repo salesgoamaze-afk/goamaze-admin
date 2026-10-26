@@ -44,12 +44,12 @@ export function getActiveAIProvider(preferredId?: string): AIProductAnalyzerProv
     return PROVIDERS[envPreferred];
   }
 
-  if (geminiProvider.isConfigured()) {
-    return geminiProvider;
-  }
-
   if (groqProvider.isConfigured()) {
     return groqProvider;
+  }
+
+  if (geminiProvider.isConfigured()) {
+    return geminiProvider;
   }
 
   return heuristicProvider;

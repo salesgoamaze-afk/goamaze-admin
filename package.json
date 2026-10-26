@@ -9,7 +9,8 @@
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "npx tsx --env-file=.env tests/multi-theme-catalog.test.mjs && npx tsx --env-file=.env tests/admin-taxonomy-batch-discovery.test.mjs && npx tsx --env-file=.env tests/audit-log-and-category-workflow.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.2",

@@ -14,7 +14,10 @@ const SingleProductSchema = z.object({
   price:         z.string().min(1),
   originalPrice: z.string().optional().default(""),
   unitPrice:     z.string().optional().default(""),
-  category:      z.string().min(1),
+  category:      z.string().optional(),
+  categories:    z.array(z.string()).optional().default([]),
+  themes:        z.array(z.string()).optional().default([]),
+  collections:   z.array(z.string()).optional().default([]),
   image:         z.string().min(1),
   images:        z.array(z.string()).optional().default([]),
   instagramUrl:  z.string().optional().default(""),
@@ -32,6 +35,7 @@ const SingleProductSchema = z.object({
   }),
   featured:      z.boolean().optional().default(false),
   source:        z.string().optional().default("amazon"),
+  analysisStatus: z.string().optional(),
 });
 
 const BatchSchema = z.object({
@@ -97,9 +101,12 @@ export async function POST(req: NextRequest) {
       originalPrice: item.originalPrice || item.price,
       subtitle: item.subtitle || `Authentic ${item.title.slice(0, 60)} — top-rated choice`,
       images: Array.isArray(item.images) && item.images.length > 0 ? item.images : [item.image],
+      categories: item.categories || [],
+      themes: item.themes || [],
+      collections: item.collections || [],
     }));
 
-    const result = await db.createProductsBatch(preparedProducts);
+    const result = await db.createProductsBatch(preparedProducts as any);
 
     const addedCount = result.added.length;
     const updatedCount = result.updated.length;

@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: "/admin/amazon-import",label: "Amazon Creator", icon: "🛒" },
   { href: "/admin/social-studio",label: "Social Studio",  icon: "🎨" },
   { href: "/admin/categories",   label: "Categories",     icon: "🏷️" },
+  { href: "/admin/audit-logs",   label: "Price Audit Logs", icon: "📋" },
   { href: "/admin/blogs",        label: "Guides & Blogs", icon: "📝" },
   { href: "/admin/newsletter",   label: "Newsletter",     icon: "📧" },
 ];

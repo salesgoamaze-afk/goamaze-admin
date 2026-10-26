@@ -90,10 +90,11 @@ export async function POST(req: NextRequest) {
 
         const result = await recommendationsStore.approveAndPublishBatch(products);
         return NextResponse.json({
-          success: true,
+          success: result.count > 0 || (result.errors?.length || 0) === 0,
           action: "approve_batch",
           count: result.count,
           ids: result.ids,
+          errors: result.errors,
           message: `Successfully approved and published ${result.count} product${result.count === 1 ? "" : "s"} to GoAmaze database!`,
         });
       }

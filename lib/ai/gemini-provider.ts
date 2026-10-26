@@ -15,7 +15,7 @@ import { analyzeProductsHeuristic } from "./heuristic-engine";
 export class GeminiProvider implements AIProductAnalyzerProvider {
   readonly id = "gemini";
   readonly name = "Google Gemini (Google AI Studio Free Tier)";
-  readonly modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  readonly modelName = process.env.GEMINI_MODEL || "gemini-flash-latest";
   readonly isFreeTier = true;
 
   private getApiKey(): string | null {
@@ -123,41 +123,58 @@ RULES:
 
     const userPrompt = `Here are the ${products.length} products to analyze for "${category}":\n\n${JSON.stringify(productPayload, null, 2)}`;
 
+    const candidateModels = Array.from(new Set([this.modelName, "gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]));
+    let lastError: string | null = null;
+    let successfulModel = this.modelName;
+    let rawText: string | null = null;
+
     try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.modelName}:generateContent?key=${apiKey}`;
+      for (const m of candidateModels) {
+        try {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(4000), // 4s strict timeout to prevent thread blocking
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
+                },
+              ],
+              generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.2,
+              },
+            }),
+          });
 
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
-            },
-          ],
-          generationConfig: {
-            responseMimeType: "application/json",
-            temperature: 0.2,
-          },
-        }),
-      });
+          if (!res.ok) {
+            const errorText = await res.text();
+            lastError = `API Error (${res.status}): ${errorText}`;
+            console.warn(`[GeminiProvider] Model ${m} returned ${res.status}. Attempting next available model if present.`);
+            continue;
+          }
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.warn(`[GeminiProvider] API Error (${res.status}): ${errorText}. Falling back to Heuristic Engine.`);
+          const data = await res.json();
+          rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (rawText) {
+            successfulModel = m;
+            break;
+          }
+        } catch (innerErr: any) {
+          lastError = innerErr.message;
+        }
+      }
+
+      if (!rawText) {
+        console.warn(`[GeminiProvider] All Gemini candidate models failed (${lastError}). Falling back to Heuristic Engine.`);
         const fallback = analyzeProductsHeuristic(category, products, weights);
         return {
           ...fallback,
-          providerUsed: `Google Gemini (${this.modelName} error ${res.status} -> Fallback Heuristic)`,
+          providerUsed: `Google Gemini (${successfulModel} failed -> Fallback Heuristic)`,
         };
-      }
-
-      const data = await res.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-      if (!rawText) {
-        throw new Error("Empty response from Gemini API");
       }
 
       const parsed = JSON.parse(rawText);
@@ -259,8 +276,8 @@ RULES:
         bestValue: mergedList.find((p) => p.award === "Best Value for Money"),
         bestBudget: mergedList.find((p) => p.award === "Best Budget Pick"),
         rankedProducts: mergedList,
-        providerUsed: `Google Gemini (${this.modelName})`,
-        modelUsed: this.modelName,
+        providerUsed: `Google Gemini (${successfulModel})`,
+        modelUsed: successfulModel,
         executionTimeMs: duration,
         timestamp: now,
         weightsUsed: weights,

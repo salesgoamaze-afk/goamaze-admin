@@ -4,7 +4,12 @@
  * across multiple sources (Amazon, Flipkart, Myntra, Manual, etc.).
  */
 
+import crypto from "crypto";
+
 export type ProductSource = "amazon" | "flipkart" | "myntra" | "manual" | string;
+
+export const DEFAULT_MARKETPLACE = process.env.AMAZON_MARKETPLACE || "www.amazon.in";
+export const DEFAULT_PARTNER_TAG = process.env.AMAZON_PARTNER_TAG || "goamaze06-21";
 
 /**
  * Robustly extracts an Amazon Standard Identification Number (ASIN)
@@ -31,27 +36,55 @@ export function extractAsin(input?: string | null): string | null {
     return asinMatch[1].toUpperCase();
   }
 
+  // From product ID format: prod_amz_b0fn41sqq7
+  const idMatch = trimmed.match(/prod_amz_([a-z0-9]{10})/i);
+  if (idMatch && idMatch[1]) {
+    return idMatch[1].toUpperCase();
+  }
+
   return null;
 }
 
 /**
- * Normalizes affiliate or product links by stripping ephemeral tracking
- * and session query parameters (e.g. tag, ref, linkCode, ascsubtag, etc.)
+ * Normalizes marketplace string into standard hostname format (e.g. "www.amazon.in").
  */
-export function normalizeProductUrl(url?: string | null): string {
+export function normalizeMarketplace(marketplace?: string | null): string {
+  if (!marketplace || typeof marketplace !== "string") return DEFAULT_MARKETPLACE;
+  let clean = marketplace.trim().toLowerCase();
+  if (!clean.startsWith("www.") && clean.includes("amazon.")) {
+    clean = `www.${clean}`;
+  }
+  return clean || DEFAULT_MARKETPLACE;
+}
+
+/**
+ * Generates deterministic canonical product ID for a product record.
+ */
+export function generateCanonicalProductId(asin: string, source: ProductSource = "amazon"): string {
+  const cleanAsin = asin.trim().toLowerCase();
+  if (source === "amazon") {
+    return `prod_amz_${cleanAsin}`;
+  }
+  return `prod_${source}_${cleanAsin}`;
+}
+
+/**
+ * Normalizes affiliate or product links by stripping ephemeral tracking
+ * and session query parameters while maintaining the canonical affiliate URL.
+ */
+export function normalizeProductUrl(url?: string | null, partnerTag: string = DEFAULT_PARTNER_TAG): string {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();
 
-  // If Amazon ASIN is present, canonicalize to clean Amazon URL
+  // If Amazon ASIN is present, canonicalize to clean Amazon affiliate URL
   const asin = extractAsin(trimmed);
   if (asin) {
-    // Preserve marketplace domain if present (.in, .com, .co.uk), default to .in
-    let domain = "amazon.in";
+    let domain = "www.amazon.in";
     const domainMatch = trimmed.match(/amazon\.(in|com|co\.uk|de|fr|ca|com\.au)/i);
     if (domainMatch && domainMatch[1]) {
-      domain = `amazon.${domainMatch[1].toLowerCase()}`;
+      domain = `www.amazon.${domainMatch[1].toLowerCase()}`;
     }
-    return `https://www.${domain}/dp/${asin}`;
+    return `https://${domain}/dp/${asin}?tag=${partnerTag}`;
   }
 
   try {
@@ -72,6 +105,26 @@ export function normalizeProductUrl(url?: string | null): string {
 }
 
 /**
+ * Computes a deterministic cryptographic fingerprint (SHA-256) of product data.
+ * Used for AI analysis versioning to detect if product data has materially changed.
+ */
+export function computeProductDataFingerprint(data: {
+  title: string;
+  features?: string[];
+  description?: string;
+  brand?: string;
+  price?: string;
+}): string {
+  const normalizedTitle = (data.title || "").trim().toLowerCase();
+  const normalizedBrand = (data.brand || "").trim().toLowerCase();
+  const normalizedFeatures = (data.features || []).map((f) => f.trim().toLowerCase()).sort().join("|");
+  const normalizedDesc = (data.description || "").replace(/<!-- AI_DATA:[\s\S]*?-->/g, "").trim().toLowerCase();
+
+  const payload = `${normalizedTitle}::${normalizedBrand}::${normalizedFeatures}::${normalizedDesc.slice(0, 500)}`;
+  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 32);
+}
+
+/**
  * Normalizes product titles for fuzzy comparison.
  */
 export function normalizeTitle(title?: string | null): string {
@@ -85,7 +138,6 @@ export function normalizeTitle(title?: string | null): string {
 
 /**
  * Determines product source. Defaults to 'amazon'.
- * Future extensible to 'flipkart', 'myntra', 'manual', etc.
  */
 export function determineProductSource(input?: { source?: string | null; affiliateLink?: string | null }): ProductSource {
   if (input?.source && typeof input.source === "string" && input.source.trim().length > 0) {
@@ -112,6 +164,7 @@ export interface CandidateProduct {
   category?: string;
   affiliateLink?: string;
   source?: string;
+  marketplace?: string;
   [key: string]: any;
 }
 

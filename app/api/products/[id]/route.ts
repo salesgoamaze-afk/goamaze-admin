@@ -14,6 +14,9 @@ const UpdateSchema = z.object({
   originalPrice: z.string().optional().or(z.literal("")),
   unitPrice:     z.string().optional().or(z.literal("")),
   category:      z.string().min(1).optional(),
+  categories:    z.array(z.string()).optional(),
+  themes:        z.array(z.string()).optional(),
+  collections:   z.array(z.string()).optional(),
   image:         z.string().min(1).optional(),
   images:        z.array(z.string()).optional(),
   instagramUrl:  z.string().optional().or(z.literal("")),
@@ -30,6 +33,7 @@ const UpdateSchema = z.object({
     return isNaN(n) ? 0 : Math.max(0, n);
   }),
   featured:      z.boolean().optional(),
+  analysisStatus: z.string().optional(),
 });
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -78,7 +82,7 @@ export async function PUT(req: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const product = await db.updateProduct(id, parsed.data);
+    const product = await db.updateProduct(id, parsed.data as any);
     if (!product) {
       return NextResponse.json(
         { success: false, message: `Product "${id}" not found` },
@@ -129,4 +133,3 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
     );
   }
 }
-

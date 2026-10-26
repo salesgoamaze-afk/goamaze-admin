@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { db, ProductRecord } from "@/lib/db";
+import { mapLegacyCategoryToTaxonomy } from "@/lib/taxonomy";
 import {
   CategoryAnalysisResult,
   ProductAIAnalysis,
@@ -116,14 +117,20 @@ export const recommendationsStore = {
     };
     const enrichedDescription = `${cleanDescription}\n\n<!-- AI_DATA: ${JSON.stringify(aiMetadata)} -->`;
 
+    const taxonomyMapping = mapLegacyCategoryToTaxonomy(product.category, product.title);
+    const assignedCategories = taxonomyMapping.categories.length > 0 ? taxonomyMapping.categories : ["home-kitchen"];
+    const assignedThemes = taxonomyMapping.themes;
+
     const productPayload: any = {
-      id: `prod_amz_${cleanAsin.toLowerCase()}`,
+      id: `amz_${cleanAsin}`,
       title: product.title.trim(),
       subtitle: product.bestFor || product.title.slice(0, 70),
       description: enrichedDescription,
       price: product.price,
       originalPrice: product.originalPrice || product.price,
-      category: product.category,
+      category: assignedCategories[0] || product.category,
+      categories: assignedCategories,
+      themes: assignedThemes,
       image: product.image,
       images: product.images && product.images.length > 0 ? product.images : [product.image],
       affiliateLink: product.affiliateLink,
@@ -132,7 +139,7 @@ export const recommendationsStore = {
       reviews: product.reviews,
       featured: product.award === "Best Overall",
       source: "amazon",
-      // Include direct AI fields (used if database table has native columns)
+      // Include direct AI fields
       aiScore: product.overallScore,
       aiScoreBreakdown: product.scoreBreakdown,
       rank: product.rank,
@@ -152,9 +159,9 @@ export const recommendationsStore = {
     let result: ProductRecord | null = null;
 
     if (existing && existing.length > 0) {
-      // Find the ID to update
+      // Find existing canonical product in store
       const all = await db.getProducts({ limit: 1000 });
-      const target = all.find((p) => p.id.includes(cleanAsin.toLowerCase()) || p.affiliateLink.includes(cleanAsin));
+      const target = all.find((p) => p.id.toUpperCase() === `AMZ_${cleanAsin}` || p.id.includes(cleanAsin.toLowerCase()) || p.affiliateLink.includes(cleanAsin));
       if (target) {
         result = await db.updateProduct(target.id, productPayload);
       } else {
@@ -173,9 +180,10 @@ export const recommendationsStore = {
   /**
    * Batch approve multiple products at once.
    */
-  async approveAndPublishBatch(products: ProductAIAnalysis[]): Promise<{ count: number; ids: string[] }> {
+  async approveAndPublishBatch(products: ProductAIAnalysis[]): Promise<{ count: number; ids: string[]; errors?: string[] }> {
     let count = 0;
     const ids: string[] = [];
+    const errors: string[] = [];
 
     for (const p of products) {
       try {
@@ -185,10 +193,12 @@ export const recommendationsStore = {
           ids.push(saved.id);
         }
       } catch (err: any) {
-        console.error(`[RecommendationsStore] Failed to approve ${p.asin}:`, err.message);
+        const msg = `Failed to approve ${p.asin}: ${err.message}`;
+        console.error(`[RecommendationsStore] ${msg}`);
+        errors.push(msg);
       }
     }
 
-    return { count, ids };
+    return { count, ids, errors: errors.length > 0 ? errors : undefined };
   },
 };

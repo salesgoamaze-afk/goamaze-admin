@@ -44,7 +44,7 @@ export async function getTokenFromCookies(req?: NextRequest) {
       if (bearer) return bearer;
     }
     // 2. Check req.cookies directly
-    const cookieVal = req.cookies.get(TOKEN_NAME)?.value;
+    const cookieVal = req.cookies?.get ? req.cookies.get(TOKEN_NAME)?.value : undefined;
     if (cookieVal) return cookieVal;
   }
 

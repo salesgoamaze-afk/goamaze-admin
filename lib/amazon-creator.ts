@@ -1,4 +1,5 @@
 import { db, ProductRecord } from "@/lib/db";
+import { recordSyncAudit, calculatePriceDiff, PriceSyncAuditEntry, PriceSyncSession } from "@/lib/audit-log";
 
 // Amazon Creators API Endpoints & Configuration
 const TOKEN_URL = process.env.AMAZON_TOKEN_URL || "https://api.amazon.co.uk/auth/o2/token";
@@ -341,10 +342,12 @@ export function getLastSyncReport(): SyncAllResult | null {
  * (price, originalPrice, offers, ratings, reviews, stock) via Amazon Creator API,
  * and updates each product in Supabase.
  */
-export async function syncAllProductsFromCreatorApi(): Promise<SyncAllResult> {
+export async function syncAllProductsFromCreatorApi(trigger: "cron" | "manual" | "startup" = "cron"): Promise<SyncAllResult> {
   const timestamp = new Date().toISOString();
+  const sessionId = `sync_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const errors: string[] = [];
   const details: SyncUpdateDetail[] = [];
+  const auditEntries: PriceSyncAuditEntry[] = [];
 
   // 1. Fetch all products currently in store
   const allProducts: ProductRecord[] = await db.getProducts({ limit: 1000 });
@@ -453,6 +456,10 @@ export async function syncAllProductsFromCreatorApi(): Promise<SyncAllResult> {
       image: product.image || live.image || "",
     });
 
+    const priceDiff = calculatePriceDiff(product.price, live.price);
+    let entryStatus: "updated" | "unchanged" | "error" = hasChanges ? "updated" : "unchanged";
+    let entryError: string | undefined = undefined;
+
     if (hasChanges) {
       try {
         await db.updateProduct(product.id, updatePayload);
@@ -461,9 +468,51 @@ export async function syncAllProductsFromCreatorApi(): Promise<SyncAllResult> {
           priceChangedCount++;
         }
       } catch (err: any) {
+        entryStatus = "error";
+        entryError = err.message;
         errors.push(`Failed to update product ${product.id} (${asin}): ${err.message}`);
       }
     }
+
+    auditEntries.push({
+      id: `audit_${sessionId}_${asin}`.replace(/[^a-zA-Z0-9_]/g, "_"),
+      sessionId,
+      timestamp,
+      productId: String(product.id),
+      asin,
+      title: product.title,
+      oldPrice: product.price,
+      newPrice: live.price || product.price,
+      oldOriginalPrice: product.originalPrice,
+      newOriginalPrice: live.originalPrice || product.originalPrice,
+      priceChanged,
+      priceDiffPercentage: priceDiff,
+      dealBadge: live.offerDetails?.dealBadge,
+      savingPercentage: live.offerDetails?.savingPercentage,
+      status: entryStatus,
+      errorMessage: entryError,
+      affiliateLink: product.affiliateLink || live.affiliateLink || `https://www.amazon.in/dp/${asin}?tag=goamaze06-21`,
+      image: product.image || live.image || "",
+    });
+  }
+
+  // Record audit log for this sync session
+  const session: PriceSyncSession = {
+    sessionId,
+    timestamp,
+    trigger,
+    totalProducts: allProducts.length,
+    syncedCount: Object.keys(liveDataMap).length,
+    updatedCount,
+    priceChangedCount,
+    skippedCount: allProducts.length - Object.keys(liveDataMap).length,
+    errors,
+  };
+
+  try {
+    await recordSyncAudit(session, auditEntries);
+  } catch (err: any) {
+    console.warn("[AmazonCreator] Failed to record sync audit log:", err.message);
   }
 
   const report: SyncAllResult = {
