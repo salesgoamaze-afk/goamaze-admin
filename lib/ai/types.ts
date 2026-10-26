@@ -1,4 +1,4 @@
-import { NormalizedCreatorProduct } from "@/lib/amazon-creator";
+import type { NormalizedCreatorProduct } from "../amazon-creator";
 
 export interface ScoringWeights {
   customerSatisfaction: number; // default: 0.25 (25%)

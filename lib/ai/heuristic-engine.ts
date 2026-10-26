@@ -1,6 +1,6 @@
-import {
+import type {
   NormalizedCreatorProduct,
-} from "@/lib/amazon-creator";
+} from "../amazon-creator";
 import {
   ProductAIAnalysis,
   ScoreBreakdown,
@@ -71,7 +71,7 @@ export function calculateBayesianRatingScore(
 export function calculateQualityScore(product: NormalizedCreatorProduct): number {
   let score = 50; // base
 
-  const text = `${product.title} ${product.description || ""} ${product.features.join(" ")}`.toLowerCase();
+  const text = `${product.title} ${product.description || ""} ${(product.features || []).join(" ")}`.toLowerCase();
 
   // Premium / durable materials signals
   const qualitySignals = [
@@ -91,7 +91,7 @@ export function calculateQualityScore(product: NormalizedCreatorProduct): number
   }
 
   // Feature list richness
-  const featureCount = product.features.length;
+  const featureCount = (product.features || []).length;
   if (featureCount >= 5) score += 12;
   else if (featureCount >= 3) score += 8;
   else if (featureCount >= 1) score += 4;
@@ -153,7 +153,7 @@ export function calculateValueForMoneyScore(
   }
 
   // Feature value bonus
-  if (product.features.length >= 4) {
+  if (product.features && product.features.length >= 4) {
     score += 5;
   }
 
@@ -168,7 +168,7 @@ export function calculateCategoryRelevanceScore(
   category: string
 ): number {
   const cleanCat = category.toLowerCase().trim();
-  const text = `${product.title} ${product.subtitle || ""} ${product.description || ""} ${product.category || ""} ${product.features.join(" ")}`.toLowerCase();
+  const text = `${product.title} ${product.subtitle || ""} ${product.description || ""} ${product.category || ""} ${(product.features || []).join(" ")}`.toLowerCase();
 
   // Find matching keyword list
   let keywords = THEME_KEYWORDS[cleanCat];

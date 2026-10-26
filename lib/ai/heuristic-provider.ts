@@ -1,4 +1,4 @@
-import { NormalizedCreatorProduct } from "@/lib/amazon-creator";
+import type { NormalizedCreatorProduct } from "../amazon-creator";
 import { AIProductAnalyzerProvider } from "./provider-interface";
 import {
   CategoryAnalysisResult,

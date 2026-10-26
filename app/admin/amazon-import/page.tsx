@@ -447,25 +447,92 @@ function AmazonImportContent() {
   const handleAnalyzeSingleAI = async (product: AmazonProduct) => {
     setAnalyzingAsin(product.asin);
     try {
-      const res = await fetch("/api/ai/recommend-taxonomy", {
+      const res = await fetch("/api/ai/analyze", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: product.title,
-          description: product.description,
-          features: product.features,
-          price: product.price,
-          brand: product.brand,
-          categoryHint: selectedCategorySlug,
+          category: selectedCategorySlug || "General",
+          products: [
+            {
+              asin: product.asin,
+              id: product.id || `prod_amz_${product.asin}`,
+              title: product.title,
+              subtitle: product.subtitle,
+              description: product.description,
+              price: product.price,
+              originalPrice: product.originalPrice,
+              unitPrice: product.unitPrice,
+              image: product.image,
+              images: product.images || [product.image],
+              affiliateLink: product.affiliateLink,
+              category: product.category,
+              badge: product.badge,
+              rating: product.rating,
+              reviews: product.reviews,
+              features: product.features || [],
+              brand: product.brand || "",
+              featured: Boolean(product.featured),
+            },
+          ],
+          provider: "heuristic",
+          forceFresh: true,
+          saveBatch: false,
         }),
       });
       const data = await res.json();
-      if (res.ok && data.success) {
-        setProductAiMap((prev) => ({ ...prev, [product.asin]: data.data }));
+      if (res.ok && data.success && Array.isArray(data.rankedProducts) && data.rankedProducts.length > 0) {
+        const item = data.rankedProducts[0];
+        const aiInfo = {
+          overallScore: item.overallScore,
+          rank: item.rank,
+          award: item.award,
+          awardBadgeColor: item.awardBadgeColor,
+          scoreBreakdown: item.scoreBreakdown,
+          suggestedCategories: item.suggestedCategories || [],
+          suggestedThemes: item.suggestedThemes || [],
+          suggestedSubcategories: item.suggestedSubcategories || [],
+          bestFor: item.bestFor,
+          pros: item.pros || [],
+          cons: item.cons || [],
+          summary: item.aiSummary || "",
+          explanation: item.recommendationReason || "",
+          providerUsed: "GoAmaze Heuristic AI Engine",
+          applied: true,
+        };
+        setProductAiMap((prev) => ({ ...prev, [product.asin]: aiInfo }));
+
+        const catName =
+          item.suggestedCategoryName ||
+          (item.suggestedCategories?.[0]
+            ? CANONICAL_CATEGORIES.find((c) => c.slug === item.suggestedCategories[0])?.name
+            : undefined);
+        const themeSlug = item.suggestedThemes?.[0] || assignedThemeSlug;
+
+        setEditedFields((prev) => ({
+          ...prev,
+          [product.asin]: {
+            ...prev[product.asin],
+            category: catName || prev[product.asin]?.category,
+            themes: themeSlug ? [themeSlug] : prev[product.asin]?.themes,
+            subcategories: item.suggestedSubcategories?.length
+              ? item.suggestedSubcategories
+              : prev[product.asin]?.subcategories,
+            badge: item.suggestedBadge || item.award || prev[product.asin]?.badge || "Amazon Pick",
+            subtitle:
+              prev[product.asin]?.subtitle ||
+              (item.bestFor ? `${item.bestFor} — authentic top-rated choice` : undefined),
+          },
+        }));
+
+        setNotice({
+          type: "success",
+          text: `✓ Heuristic AI analysis applied to ${product.title.slice(0, 45)}…`,
+        });
       }
     } catch (e: any) {
       console.error("AI single analysis error:", e);
+      setNotice({ type: "error", text: "AI analysis issue: " + e.message });
     } finally {
       setAnalyzingAsin(null);
     }
@@ -474,16 +541,124 @@ function AmazonImportContent() {
   const handleAnalyzeBatchAI = async () => {
     if (products.length === 0) return;
     setAiAnalyzingBatch(true);
-    setNotice({ type: "info", text: "Analyzing candidate products with AI model…" });
+    setNotice({ type: "info", text: "🧠 Applying Heuristic AI analysis across candidate products…" });
+
+    // Target either selected products or all products in current list
+    const candidateList =
+      selectedAsins.size > 0
+        ? products.filter((p) => selectedAsins.has(p.asin))
+        : products;
+
+    if (candidateList.length === 0) {
+      setAiAnalyzingBatch(false);
+      setNotice({ type: "error", text: "No products available to analyze." });
+      return;
+    }
+
     try {
-      for (const p of paginatedProducts) {
-        if (!productAiMap[p.asin]) {
-          await handleAnalyzeSingleAI(p);
+      const res = await fetch("/api/ai/analyze", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: selectedCategorySlug || "General",
+          products: candidateList.map((p) => ({
+            asin: p.asin,
+            id: p.id || `prod_amz_${p.asin}`,
+            title: p.title,
+            subtitle: p.subtitle,
+            description: p.description,
+            price: p.price,
+            originalPrice: p.originalPrice,
+            unitPrice: p.unitPrice,
+            image: p.image,
+            images: p.images || [p.image],
+            affiliateLink: p.affiliateLink,
+            category: p.category,
+            badge: p.badge,
+            rating: p.rating,
+            reviews: p.reviews,
+            features: p.features || [],
+            brand: p.brand || "",
+            featured: Boolean(p.featured),
+          })),
+          provider: "heuristic",
+          forceFresh: true,
+          saveBatch: false,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success || !Array.isArray(data.rankedProducts)) {
+        throw new Error(data.error || "Heuristic analysis failed");
+      }
+
+      const newAiMap: Record<string, any> = {};
+      const newEdits: Record<string, Partial<AmazonProduct>> = {};
+      const newlySelected = new Set(selectedAsins);
+
+      for (const item of data.rankedProducts) {
+        const asin = item.asin;
+        if (!asin) continue;
+
+        newAiMap[asin] = {
+          overallScore: item.overallScore,
+          rank: item.rank,
+          award: item.award,
+          awardBadgeColor: item.awardBadgeColor,
+          scoreBreakdown: item.scoreBreakdown,
+          suggestedCategories: item.suggestedCategories || [],
+          suggestedThemes: item.suggestedThemes || [],
+          suggestedSubcategories: item.suggestedSubcategories || [],
+          bestFor: item.bestFor,
+          pros: item.pros || [],
+          cons: item.cons || [],
+          summary: item.aiSummary || "",
+          explanation: item.recommendationReason || "",
+          providerUsed: "GoAmaze Heuristic AI Engine",
+          applied: true,
+        };
+
+        const currentEdits = editedFields[asin] || {};
+        const catName =
+          item.suggestedCategoryName ||
+          (item.suggestedCategories?.[0]
+            ? CANONICAL_CATEGORIES.find((c) => c.slug === item.suggestedCategories[0])?.name
+            : undefined);
+        const themeSlug = item.suggestedThemes?.[0] || assignedThemeSlug;
+
+        newEdits[asin] = {
+          ...currentEdits,
+          category: catName || currentEdits.category,
+          themes: themeSlug ? [themeSlug] : currentEdits.themes,
+          subcategories: item.suggestedSubcategories?.length
+            ? item.suggestedSubcategories
+            : currentEdits.subcategories,
+          badge: item.suggestedBadge || item.award || currentEdits.badge || "Amazon Pick",
+          featured: item.award === "Best Overall" || item.overallScore >= 90 ? true : currentEdits.featured,
+          subtitle:
+            currentEdits.subtitle ||
+            (item.bestFor ? `${item.bestFor} — authentic top-rated choice` : undefined),
+        };
+
+        if (selectedAsins.size === 0) {
+          newlySelected.add(asin);
         }
       }
-      setNotice({ type: "success", text: "✓ AI recommendations generated for candidate products!" });
+
+      setProductAiMap((prev) => ({ ...prev, ...newAiMap }));
+      setEditedFields((prev) => ({ ...prev, ...newEdits }));
+      if (selectedAsins.size === 0) {
+        setSelectedAsins(newlySelected);
+      }
+
+      setNotice({
+        type: "success",
+        text: `✓ Heuristic AI analysis applied to ${data.rankedProducts.length} products! Categories, themes, awards, and badges updated.`,
+      });
     } catch (e: any) {
-      setNotice({ type: "error", text: "AI batch analysis issue: " + e.message });
+      console.error("[Heuristic AI Batch Error]", e);
+      setNotice({ type: "error", text: "Heuristic AI analysis issue: " + e.message });
     } finally {
       setAiAnalyzingBatch(false);
     }
@@ -1374,7 +1549,8 @@ function AmazonImportContent() {
               <button
                 type="button"
                 onClick={handleAnalyzeBatchAI}
-                disabled={aiAnalyzingBatch}
+                disabled={aiAnalyzingBatch || products.length === 0}
+                title="Run deterministic Heuristic AI analysis (satisfaction, quality, value, taxonomy & awards) and apply directly to batch"
                 style={{
                   padding: "9px 16px",
                   borderRadius: "10px",
@@ -1390,7 +1566,7 @@ function AmazonImportContent() {
                   gap: "6px",
                 }}
               >
-                {aiAnalyzingBatch ? "🧠 AI Analyzing Batch…" : "✨ AI Analyze Batch"}
+                {aiAnalyzingBatch ? "🧠 Applying Heuristic AI…" : "✨ AI Analyze Batch"}
               </button>
 
               <button
@@ -1751,7 +1927,7 @@ function AmazonImportContent() {
                     </div>
                   </div>
 
-                  {/* Category & Theme Assignment Selectors */}
+                  {/* Category, Theme & Badge Assignment Selectors */}
                   <div
                     style={{
                       background: "rgba(255,255,255,0.02)",
@@ -1759,7 +1935,7 @@ function AmazonImportContent() {
                       borderRadius: "10px",
                       padding: "10px 12px",
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
+                      gridTemplateColumns: "1fr 1fr 1fr",
                       gap: "8px",
                     }}
                   >
@@ -1814,6 +1990,32 @@ function AmazonImportContent() {
                         ))}
                       </select>
                     </div>
+
+                    <div>
+                      <span style={{ display: "block", fontSize: "0.7rem", color: "#FBBF24", fontWeight: 600, marginBottom: "3px" }}>
+                        Storefront Badge:
+                      </span>
+                      <select
+                        value={effective.badge}
+                        onChange={(e) => updateProductField(p.asin, "badge", e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "5px 8px",
+                          borderRadius: "6px",
+                          background: "#0F172A",
+                          border: "1px solid rgba(251,191,36,0.3)",
+                          color: "#FDE68A",
+                          fontSize: "0.74rem",
+                          outline: "none",
+                        }}
+                      >
+                        {BADGE_OPTIONS.map((b) => (
+                          <option key={b} value={b}>
+                            🏷️ {b}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {/* AI Recommendation Box */}
@@ -1826,42 +2028,73 @@ function AmazonImportContent() {
                         padding: "10px 12px",
                       }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                        <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#C4B5FD" }}>
-                          🤖 AI Assessment ({aiData.overallScore || 85}/100)
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (aiData.suggestedCategories?.[0]) {
-                              const found = CANONICAL_CATEGORIES.find((c) => c.slug === aiData.suggestedCategories[0]);
-                              if (found) updateProductField(p.asin, "category", found.name);
-                            }
-                            if (aiData.suggestedThemes?.[0]) {
-                              updateProductField(p.asin, "themes", [aiData.suggestedThemes[0]]);
-                            }
-                          }}
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginBottom: "6px",
+                          flexWrap: "wrap",
+                          gap: "6px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#C4B5FD" }}>
+                            🧠 Heuristic Score ({aiData.overallScore || 85}/100)
+                          </span>
+                          {aiData.award && (
+                            <span
+                              style={{
+                                padding: "2px 7px",
+                                borderRadius: "8px",
+                                background: aiData.awardBadgeColor || "rgba(234, 179, 8, 0.2)",
+                                color: "#FDE047",
+                                fontSize: "0.68rem",
+                                fontWeight: 700,
+                              }}
+                            >
+                              🏆 {aiData.award}
+                            </span>
+                          )}
+                        </div>
+
+                        <span
                           style={{
-                            background: "#8B5CF6",
-                            border: "none",
-                            color: "white",
-                            padding: "2px 8px",
-                            borderRadius: "4px",
-                            fontSize: "0.68rem",
+                            fontSize: "0.66rem",
                             fontWeight: 700,
-                            cursor: "pointer",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            background: "rgba(16,185,129,0.18)",
+                            color: "#34D399",
+                            border: "1px solid rgba(16,185,129,0.3)",
                           }}
                         >
-                          Apply AI Tags
-                        </button>
+                          ✓ Heuristic Applied
+                        </span>
                       </div>
-                      {aiData.bestFor?.[0] && (
-                        <div style={{ fontSize: "0.72rem", color: "#E2E8F0", marginBottom: "2px" }}>
-                          <strong>Best For:</strong> {aiData.bestFor.slice(0, 2).join(", ")}
+
+                      {aiData.bestFor && (
+                        <div style={{ fontSize: "0.72rem", color: "#E2E8F0", marginBottom: "3px" }}>
+                          <strong style={{ color: "#A78BFA" }}>Best For:</strong>{" "}
+                          {Array.isArray(aiData.bestFor) ? aiData.bestFor.slice(0, 2).join(", ") : aiData.bestFor}
                         </div>
                       )}
-                      <div style={{ fontSize: "0.7rem", color: "#94A3B8" }}>
-                        Suggested Themes: <strong>{aiData.suggestedThemes?.join(", ") || "None"}</strong>
+
+                      {aiData.pros?.[0] && (
+                        <div style={{ fontSize: "0.7rem", color: "#34D399", marginBottom: "3px" }}>
+                          ✓ {aiData.pros[0]}
+                        </div>
+                      )}
+
+                      <div style={{ fontSize: "0.68rem", color: "#94A3B8", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "4px" }}>
+                        <span>
+                          Theme: <strong style={{ color: "#FDBA74" }}>{aiData.suggestedThemes?.join(", ") || "None"}</strong>
+                        </span>
+                        {aiData.scoreBreakdown && (
+                          <span style={{ color: "#64748B" }}>
+                            Quality: {aiData.scoreBreakdown.productQuality} • Value: {aiData.scoreBreakdown.valueForMoney}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -1874,7 +2107,7 @@ function AmazonImportContent() {
                           background: "transparent",
                           border: "1px solid rgba(139,92,246,0.3)",
                           color: "#C4B5FD",
-                          padding: "3px 8px",
+                          padding: "4px 10px",
                           borderRadius: "6px",
                           fontSize: "0.72rem",
                           fontWeight: 600,

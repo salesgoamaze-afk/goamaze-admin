@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { title, description, features = [], price, brand, categoryHint } = body;
+    const { title, description, features = [], price, brand, categoryHint, provider } = body;
 
     if (!title || typeof title !== "string" || !title.trim()) {
       return NextResponse.json(
@@ -63,14 +63,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const aiResult = await classifyAndAnalyzeProduct({
-      title: title.trim(),
-      description: description || "",
-      features: Array.isArray(features) ? features : [],
-      price: price ? String(price) : undefined,
-      brand: brand || "",
-      categoryHint: categoryHint || "",
-    });
+    const aiResult = await classifyAndAnalyzeProduct(
+      {
+        title: title.trim(),
+        description: description || "",
+        features: Array.isArray(features) ? features : [],
+        price: price ? String(price) : undefined,
+        brand: brand || "",
+        categoryHint: categoryHint || "",
+      },
+      { provider: provider || "heuristic" }
+    );
 
     const cls = aiResult.classification;
 
